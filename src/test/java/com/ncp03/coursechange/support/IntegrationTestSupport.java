@@ -36,5 +36,7 @@ public abstract class IntegrationTestSupport {
         registry.add("spring.flyway.clean-disabled", () -> "false");
         // 기존 테스트는 X-Student-Id 헤더를 쓴다. 토큰 동작은 AuthApiTest가 따로 검증한다.
         registry.add("app.auth.mode", () -> "DEMO");
+        // 만료 처리는 테스트가 직접 호출해 시점을 통제한다.
+        registry.add("app.matching.expire-scheduler-enabled", () -> "false");
     }
 }

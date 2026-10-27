@@ -1,6 +1,6 @@
 package com.ncp03.coursechange;
 
-import com.ncp03.coursechange.support.IntegrationTestSupport;
+import com.ncp03.coursechange.support.ResettableIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>샘플 데이터 기준: 학생 1(졸린고양이)은 분반 3·5·7·10·18을 수강 중이다.
  * 분반 10은 프로그래밍언어론 02분반이고, 분반 9는 같은 과목 01분반이다.
  */
-class WishlistApiTest extends IntegrationTestSupport {
+class WishlistApiTest extends ResettableIntegrationTest {
 
     @Autowired
     MockMvc mvc;

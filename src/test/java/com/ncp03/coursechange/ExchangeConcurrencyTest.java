@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.TestPropertySource;
 
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -32,7 +33,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 동시성 시험. <b>10월 27일 안건("락 없이 → 1차 테스트 후 락 추가")의 근거가 되는 테스트다.</b>
  *
- * <p>검증하는 불변식: 어떤 락 모드에서든 <b>데이터는 절대 깨지지 않는다</b>.
+ * <p>이 테스트는 <b>PESSIMISTIC(락 있음)</b> 모드로 돌린다. 락 없음(NONE)에서는 같은 요청이 여러 매칭 세션에 묶이는
+ * 이상 현상이 실제로 생기며, 그것이 1차 부하테스트에서 보여줄 문제다 (좌석 자체는 낙관적 락·UNIQUE가 지켜 준다).
+ *
+ * <p>검증하는 불변식 (락 있음 기준):
  * <ul>
  *   <li>한 요청이 두 세션에 동시에 묶이지 않는다</li>
  *   <li>한 좌석이 두 번 교환되지 않는다 (학점 합계·수강 과목 수가 보존된다)</li>
@@ -42,10 +46,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * NONE이면 EXCHANGE_CONFLICT(409)가 늘고, PESSIMISTIC이면 대기해서 성공률이 올라간다.
  * 부하테스트에서 비교할 지표가 바로 이 숫자다.
  *
- * <p>이 테스트는 {@code app.matching.lock-mode}의 현재 값(기본 NONE)으로 돌아간다.
- * 락 버전으로 돌리려면 {@code ./gradlew test --tests '*ExchangeConcurrencyTest' -Dapp.matching.lock-mode=PESSIMISTIC}
- * 대신 {@code application.yml}을 바꾸거나 별도 프로파일을 쓴다 (로그에 현재 모드를 찍는다).
  */
+@TestPropertySource(properties = "app.matching.lock-mode=PESSIMISTIC")
 class ExchangeConcurrencyTest extends ResettableIntegrationTest {
 
     private static final Logger log = LoggerFactory.getLogger(ExchangeConcurrencyTest.class);

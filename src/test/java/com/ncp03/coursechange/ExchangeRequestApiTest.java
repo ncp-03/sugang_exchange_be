@@ -2,7 +2,7 @@ package com.ncp03.coursechange;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ncp03.coursechange.support.IntegrationTestSupport;
+import com.ncp03.coursechange.support.ResettableIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>분반 3 = 월수 10:30, 분반 16 = 월수 10:30 (시간표 겹침 시험용)</li>
  * </ul>
  */
-class ExchangeRequestApiTest extends IntegrationTestSupport {
+class ExchangeRequestApiTest extends ResettableIntegrationTest {
 
     @Autowired
     MockMvc mvc;
@@ -192,17 +192,19 @@ class ExchangeRequestApiTest extends IntegrationTestSupport {
     @Test
     @DisplayName("희망 분반 수정(PATCH)과 조회 권한: 남의 요청은 403 NOT_MY_REQUEST")
     void updateAndOwnership() throws Exception {
+        // 학생 9는 분반 12(월수 13:30)를 내놓고, 시간표가 안 겹치는 분반 10(월수 13:30)·6(월수 15:00)을 원한다.
+        // (분반 11은 학생 9가 듣는 분반 7과 월수 12:00으로 겹쳐서 SCHEDULE_CONFLICT가 난다.)
         long enr = enrollmentIdOf(9, 12);
         MvcResult created = mvc.perform(post("/api/exchange-requests").header(STUDENT, "9")
-                        .contentType(MediaType.APPLICATION_JSON).content(body(enr, "11", false)))
+                        .contentType(MediaType.APPLICATION_JSON).content(body(enr, "10", false)))
                 .andExpect(status().isCreated()).andReturn();
         long requestId = om.readTree(created.getResponse().getContentAsString()).path("requestId").asLong();
 
         mvc.perform(patch("/api/exchange-requests/" + requestId).header(STUDENT, "9")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"wantedOfferingIds\":[11,6]}"))
+                        .content("{\"wantedOfferingIds\":[10,6]}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.preferences[0].course.offeringId").value(11))
+                .andExpect(jsonPath("$.preferences[0].course.offeringId").value(10))
                 .andExpect(jsonPath("$.preferences[1].course.offeringId").value(6));
 
         mvc.perform(get("/api/exchange-requests/" + requestId).header(STUDENT, "1"))

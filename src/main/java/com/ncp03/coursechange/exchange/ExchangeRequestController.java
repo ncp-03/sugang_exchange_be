@@ -121,6 +121,18 @@ public class ExchangeRequestController {
         requestService.cancel(studentId, requestId);
     }
 
+    @Operation(summary = "내 요청의 대기열 순위",
+            description = "내 1순위 희망 분반을 같이 원하는 대기 요청들 사이에서 우선순위 점수(학년·기다린 시간·학점 여유·감점)로 순위를 매긴다.",
+            security = @SecurityRequirement(name = OpenApiConfig.STUDENT_ID_SCHEME))
+    @ApiResponse(responseCode = "200", description = "성공")
+    @ApiResponse(responseCode = "403", description = "남의 요청",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/{requestId}/queue")
+    public QueuePositionResponse queue(@Parameter(hidden = true) @CurrentStudentId Long studentId,
+                                       @PathVariable @Min(1) Long requestId) {
+        return matchingService.queuePosition(studentId, requestId);
+    }
+
     @Operation(summary = "빠른 매칭",
             description = """
                     서로 원하는 상대를 찾아 매칭 세션을 만듭니다.

@@ -13,9 +13,12 @@ import com.ncp03.coursechange.domain.MatchParticipant;
 import com.ncp03.coursechange.domain.MatchParticipantRepository;
 import com.ncp03.coursechange.domain.MatchSession;
 import com.ncp03.coursechange.domain.MatchSessionRepository;
+import com.ncp03.coursechange.domain.PenaltyReason;
 import com.ncp03.coursechange.domain.RequestStatus;
 import com.ncp03.coursechange.domain.Student;
 import com.ncp03.coursechange.student.StudentService;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import jakarta.persistence.OptimisticLockException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,8 +52,9 @@ import java.util.Optional;
  * <h2>락 전략 (10월 27일 부하테스트용)</h2>
  * {@code app.matching.lock-mode}로 락 없는 버전과 비관적 락 버전을 같은 코드로 전환한다.
  * <ul>
- *   <li>{@code NONE} — 1차. DB 제약(UNIQUE active_enrollment_id)과 JPA 낙관적 락(@Version)만으로 막는다.
- *       동시 요청이 겹치면 409 EXCHANGE_CONFLICT가 난다. 데이터는 깨지지 않고 실패율만 올라간다.</li>
+ *   <li>{@code NONE} — 1차. 좌석 교환은 JPA 낙관적 락(@Version)이 막아 주지만, <b>매칭 단계는 막는 장치가 없다.</b>
+ *       같은 상대를 노린 요청이 동시에 오면 한 요청이 여러 매칭 세션에 묶이거나, 두 사람이 동시에 동의해도
+ *       교환이 실행되지 않고 세션이 PENDING으로 남을 수 있다. 이 이상 현상을 1차 측정에서 숫자로 보여준다.</li>
  *   <li>{@code PESSIMISTIC} — 2차. 요청·좌석 행을 SELECT ... FOR UPDATE로 잠근다.
  *       충돌 시 대기하므로 실패율은 낮고 응답 시간(p95)은 올라간다.</li>
  * </ul>
@@ -77,6 +81,9 @@ public class MatchingService {
     private final ExchangeValidator validator;
     private final MatchSessionAssembler assembler;
     private final MatchingProperties properties;
+    private final EntityManager entityManager;
+    private final PenaltyService penaltyService;
+    private final PriorityScorer priorityScorer;
 
     public MatchingService(ExchangeRequestRepository requestRepository,
                            ExchangePreferenceRepository preferenceRepository,
@@ -87,7 +94,10 @@ public class MatchingService {
                            ExchangeRequestService requestService,
                            ExchangeValidator validator,
                            MatchSessionAssembler assembler,
-                           MatchingProperties properties) {
+                           MatchingProperties properties,
+                           EntityManager entityManager,
+                           PenaltyService penaltyService,
+                           PriorityScorer priorityScorer) {
         this.requestRepository = requestRepository;
         this.preferenceRepository = preferenceRepository;
         this.enrollmentRepository = enrollmentRepository;
@@ -98,6 +108,9 @@ public class MatchingService {
         this.validator = validator;
         this.assembler = assembler;
         this.properties = properties;
+        this.entityManager = entityManager;
+        this.penaltyService = penaltyService;
+        this.priorityScorer = priorityScorer;
     }
 
     // =============================================================== 빠른 매칭
@@ -132,11 +145,13 @@ public class MatchingService {
             return QuickMatchResponse.notMatched(NO_COUNTERPART, 0);
         }
 
-        // ① 내 희망 순위 오름차순 → ② 상대 대기 시간 오름차순(오래 기다린 사람 먼저)
+        // ① 내 희망 순위 오름차순 → ② 우선순위 점수 내림차순(학년·기다린 시간·학점 여유·감점) → ③ 먼저 등록한 순
+        Map<Long, Long> scores = priorityScorer.scoreAll(candidates, LocalDateTime.now());
         List<ExchangeRequest> sorted = new ArrayList<>(candidates);
         sorted.sort(Comparator
                 .comparingInt((ExchangeRequest r) ->
                         rankByOfferingId.getOrDefault(r.getOfferedEnrollment().getOffering().getId(), Integer.MAX_VALUE))
+                .thenComparing((ExchangeRequest r) -> scores.getOrDefault(r.getId(), 0L), Comparator.reverseOrder())
                 .thenComparing(ExchangeRequest::getQueuedAt)
                 .thenComparing(ExchangeRequest::getId));
 
@@ -176,13 +191,12 @@ public class MatchingService {
             return Optional.empty(); // 같은 분반끼리는 교환 의미가 없다 (DB CHECK도 막는다)
         }
 
-        // 락 모드가 PESSIMISTIC이면 두 요청·두 좌석을 ID 오름차순으로 잠근다.
+        // PESSIMISTIC: 두 요청 행을 ID 오름차순으로 잠그고 DB의 최신 상태로 새로고침한다.
+        // (이미 읽어 둔 엔티티는 잠가도 값이 안 바뀌므로 refresh가 꼭 필요하다.)
+        // 새로고침한 상태가 WAITING이 아니면 그사이 다른 매칭에 묶인 것이라 이 후보는 건너뛴다.
+        // NONE: 잠그지 않는다. 같은 상대를 노린 요청이 겹치면 한 요청이 두 세션에 묶일 수 있다 (1차 측정에서 보여줄 문제).
         if (properties.isPessimistic()) {
-            requestRepository.lockAllByIdOrdered(
-                    sortedIds(myRequest.getId(), theirRequest.getId()));
-            enrollmentRepository.lockAllByIdOrdered(
-                    sortedIds(myEnrollment.getId(), theirEnrollment.getId()));
-            // 잠근 뒤 상태를 다시 본다 (그사이 바뀌었을 수 있다)
+            lockAndRefresh(myRequest, theirRequest);
             if (myRequest.getStatus() != RequestStatus.WAITING
                     || theirRequest.getStatus() != RequestStatus.WAITING) {
                 return Optional.empty();
@@ -213,7 +227,7 @@ public class MatchingService {
             return Optional.of(session);
 
         } catch (IllegalStateException e) {
-            // markMatched()가 거부 → 상대가 방금 다른 세션에 묶였다. 다음 후보로.
+            // markMatched()가 거부 → 상대가 방금 다른 세션에 묶였다.
             log.debug("매칭 시도 실패(상태 변경): requestId={}, partnerRequestId={}, 이유={}",
                     myRequest.getId(), theirRequest.getId(), e.getMessage());
             throw new ApiException(ErrorCode.EXCHANGE_CONFLICT,
@@ -224,6 +238,39 @@ public class MatchingService {
                     myRequest.getId(), theirRequest.getId(), e);
             throw new ApiException(ErrorCode.EXCHANGE_CONFLICT);
         }
+    }
+
+    // =============================================================== 대기열 순위
+
+    /** 내 요청의 대기열 순위: 내 1순위 희망 분반을 같이 원하는 대기 요청들을 우선순위 점수로 줄 세운다. */
+    public QueuePositionResponse queuePosition(Long studentId, Long requestId) {
+        studentService.getStudent(studentId);
+        ExchangeRequest mine = requestService.loadMyRequest(studentId, requestId);
+        if (mine.getStatus() != RequestStatus.WAITING) {
+            return new QueuePositionResponse(requestId, mine.getStatus().name(), null, 0, null);
+        }
+        List<Long> wanted = preferenceRepository.findTargetOfferingIdsByRequestId(requestId);
+        if (wanted.isEmpty()) {
+            return new QueuePositionResponse(requestId, mine.getStatus().name(), null, 0, null);
+        }
+        List<ExchangeRequest> rivals = new ArrayList<>(requestRepository.findWaitingWantingOffering(wanted.get(0)));
+        if (rivals.stream().noneMatch(r -> r.getId().equals(requestId))) {
+            rivals.add(mine);
+        }
+        Map<Long, Long> scores = priorityScorer.scoreAll(rivals, LocalDateTime.now());
+        rivals.sort(Comparator
+                .comparing((ExchangeRequest r) -> scores.getOrDefault(r.getId(), 0L), Comparator.reverseOrder())
+                .thenComparing(ExchangeRequest::getQueuedAt)
+                .thenComparing(ExchangeRequest::getId));
+        int position = 1;
+        for (ExchangeRequest r : rivals) {
+            if (r.getId().equals(requestId)) {
+                break;
+            }
+            position++;
+        }
+        return new QueuePositionResponse(requestId, mine.getStatus().name(), position, rivals.size(),
+                scores.getOrDefault(requestId, 0L));
     }
 
     // =============================================================== 세션 조회
@@ -286,6 +333,9 @@ public class MatchingService {
         }
         me.reject(now);
         session.reject(now, now.plusSeconds(properties.getRematchCooldownSeconds()));
+        // 거절은 감점 (귀책 있는 쪽만)
+        penaltyService.apply(me.getStudent(), session, PenaltyReason.REJECTED,
+                properties.getPenaltyRejectPoints(), now);
 
         // 거절한 사람은 대기 시간 초기화(귀책), 상대는 유지.
         for (MatchParticipant p : participants) {
@@ -333,7 +383,11 @@ public class MatchingService {
         Enrollment enrollmentB = b.getOfferedEnrollment();
 
         if (properties.isPessimistic()) {
-            enrollmentRepository.lockAllByIdOrdered(sortedIds(enrollmentA.getId(), enrollmentB.getId()));
+            // 좌석 행을 ID 오름차순으로 잠그고 최신 상태로 새로고침한 뒤 아래에서 스냅샷과 비교한다.
+            Enrollment first = enrollmentA.getId() <= enrollmentB.getId() ? enrollmentA : enrollmentB;
+            Enrollment second = first == enrollmentA ? enrollmentB : enrollmentA;
+            entityManager.refresh(first, LockModeType.PESSIMISTIC_WRITE);
+            entityManager.refresh(second, LockModeType.PESSIMISTIC_WRITE);
         }
 
         // 매칭 당시 스냅샷과 지금 좌석이 같은지 확인 (그사이 다른 교환으로 바뀌었을 수 있다)
@@ -381,7 +435,16 @@ public class MatchingService {
     public int expireTimedOutSessions() {
         LocalDateTime now = LocalDateTime.now();
         List<MatchSession> expired = sessionRepository.findExpiredPending(now);
+        int processed = 0;
         for (MatchSession session : expired) {
+            if (properties.isPessimistic()) {
+                // 같은 순간 동의가 들어와 이미 끝난 세션이면 건드리지 않는다.
+                entityManager.refresh(session, LockModeType.PESSIMISTIC_WRITE);
+                if (!session.isPending()) {
+                    continue;
+                }
+            }
+            processed++;
             List<MatchParticipant> participants = participantRepository.findBySessionIdWithAll(session.getId());
             session.expire(now, now.plusSeconds(properties.getRematchCooldownSeconds()));
             for (MatchParticipant p : participants) {
@@ -389,16 +452,27 @@ public class MatchingService {
                     // 동의하지 않은 쪽이 귀책 → 대기 시간 초기화. 동의한 쪽은 유지.
                     p.getRequest().requeue(now, p.hasAccepted());
                 }
+                // 동의하지 않은 쪽(잠수)은 감점
+                if (!p.hasAccepted()) {
+                    penaltyService.apply(p.getStudent(), session, PenaltyReason.NO_RESPONSE,
+                            properties.getPenaltyNoResponsePoints(), now);
+                }
             }
         }
-        return expired.size();
+        return processed;
     }
 
     // =============================================================== 내부 공통
 
     private MatchSession loadPendingSession(Long sessionId, LocalDateTime now) {
-        MatchSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new ApiException(ErrorCode.SESSION_NOT_FOUND));
+        // PESSIMISTIC: 트랜잭션의 첫 쿼리로 세션 행을 잠근다. 두 참여자가 동시에 동의해도 한 명씩 처리되어
+        // 서로 상대의 동의를 못 보고 둘 다 "아직 한 명만 동의"로 끝나는 일(교환 미실행)을 막는다.
+        MatchSession session = properties.isPessimistic()
+                ? entityManager.find(MatchSession.class, sessionId, LockModeType.PESSIMISTIC_WRITE)
+                : sessionRepository.findById(sessionId).orElse(null);
+        if (session == null) {
+            throw new ApiException(ErrorCode.SESSION_NOT_FOUND);
+        }
         if (!session.isPending()) {
             throw new ApiException(ErrorCode.SESSION_NOT_PENDING,
                     "이미 끝난 매칭입니다. 상태=" + session.getStatus());
@@ -416,8 +490,11 @@ public class MatchingService {
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_MY_SESSION));
     }
 
-    /** 교착 상태 방지: 항상 작은 ID부터 잠근다. */
-    private static List<Long> sortedIds(Long a, Long b) {
-        return a <= b ? List.of(a, b) : List.of(b, a);
+    /** 교착 상태 방지: 항상 작은 ID부터 잠그고, 잠근 직후 DB의 최신 값으로 엔티티를 덮어쓴다. */
+    private void lockAndRefresh(ExchangeRequest a, ExchangeRequest b) {
+        ExchangeRequest first = a.getId() <= b.getId() ? a : b;
+        ExchangeRequest second = first == a ? b : a;
+        entityManager.refresh(first, LockModeType.PESSIMISTIC_WRITE);
+        entityManager.refresh(second, LockModeType.PESSIMISTIC_WRITE);
     }
 }

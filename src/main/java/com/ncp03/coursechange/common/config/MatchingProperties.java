@@ -16,9 +16,9 @@ import org.springframework.stereotype.Component;
  * java -jar app.jar --app.matching.lock-mode=PESSIMISTIC
  * </pre>
  *
- * <p>NONE이어도 DB 제약(UNIQUE uk_requests_active_enrollment, 낙관적 락 version)은 살아 있어서
- * 데이터가 깨지지는 않는다. 대신 동시 요청이 겹치면 409 EXCHANGE_CONFLICT가 늘어난다.
- * 바로 이 실패율 차이를 측정하는 것이 부하테스트의 목적이다.
+ * <p>NONE이어도 좌석 교환은 DB 제약(UNIQUE)과 낙관적 락(version)이 지켜서 좌석 데이터는 깨지지 않는다.
+ * 다만 매칭 단계에는 막는 장치가 없어서, 동시 요청이 겹치면 한 요청이 여러 세션에 묶이거나
+ * 409 EXCHANGE_CONFLICT가 늘어난다. 바로 이 차이를 측정하는 것이 부하테스트의 목적이다.
  */
 @Component
 @ConfigurationProperties(prefix = "app.matching")
@@ -43,6 +43,28 @@ public class MatchingProperties {
     /** 요청 1건에 넣을 수 있는 희망 분반 최대 개수. */
     private int maxPreferences = 10;
 
+    // ---- 패널티 (회의 결정: 만료 잠수 5점, 거절 1~2점 → 2점, 누적되면 일정 시간 매칭 차단)
+    /** 거절 버튼 감점. */
+    private int penaltyRejectPoints = 2;
+    /** 만료까지 동의하지 않은 쪽(잠수) 감점. */
+    private int penaltyNoResponsePoints = 5;
+    /** 최근 N시간 누적 감점이 이 값 이상이면 매칭을 막는다. */
+    private int penaltyBlockThresholdPoints = 10;
+    private int penaltyWindowHours = 24;
+    /** 차단 시간(분). */
+    private int penaltyBlockMinutes = 60;
+
+    // ---- 만료 자동 처리 스케줄러
+    private boolean expireSchedulerEnabled = true;
+    private long expireSchedulerIntervalMs = 5000;
+
+    // ---- 우선순위 점수 가중치 (학년·기다린 시간·여유 학점·감점). 점수가 높을수록 먼저 매칭 후보가 된다.
+    private int scoreYearWeight = 10;
+    private int scoreWaitWeightPerMinute = 1;
+    private int scoreWaitCapMinutes = 120;
+    private int scoreCreditSlackWeight = 1;
+    private int scorePenaltyWeight = 5;
+
     public boolean isPessimistic() {
         return lockMode == LockMode.PESSIMISTIC;
     }
@@ -57,6 +79,31 @@ public class MatchingProperties {
     public void setRematchCooldownSeconds(int rematchCooldownSeconds) {
         this.rematchCooldownSeconds = rematchCooldownSeconds;
     }
+
+    public int getPenaltyRejectPoints() { return penaltyRejectPoints; }
+    public void setPenaltyRejectPoints(int v) { this.penaltyRejectPoints = v; }
+    public int getPenaltyNoResponsePoints() { return penaltyNoResponsePoints; }
+    public void setPenaltyNoResponsePoints(int v) { this.penaltyNoResponsePoints = v; }
+    public int getPenaltyBlockThresholdPoints() { return penaltyBlockThresholdPoints; }
+    public void setPenaltyBlockThresholdPoints(int v) { this.penaltyBlockThresholdPoints = v; }
+    public int getPenaltyWindowHours() { return penaltyWindowHours; }
+    public void setPenaltyWindowHours(int v) { this.penaltyWindowHours = v; }
+    public int getPenaltyBlockMinutes() { return penaltyBlockMinutes; }
+    public void setPenaltyBlockMinutes(int v) { this.penaltyBlockMinutes = v; }
+    public boolean isExpireSchedulerEnabled() { return expireSchedulerEnabled; }
+    public void setExpireSchedulerEnabled(boolean v) { this.expireSchedulerEnabled = v; }
+    public long getExpireSchedulerIntervalMs() { return expireSchedulerIntervalMs; }
+    public void setExpireSchedulerIntervalMs(long v) { this.expireSchedulerIntervalMs = v; }
+    public int getScoreYearWeight() { return scoreYearWeight; }
+    public void setScoreYearWeight(int v) { this.scoreYearWeight = v; }
+    public int getScoreWaitWeightPerMinute() { return scoreWaitWeightPerMinute; }
+    public void setScoreWaitWeightPerMinute(int v) { this.scoreWaitWeightPerMinute = v; }
+    public int getScoreWaitCapMinutes() { return scoreWaitCapMinutes; }
+    public void setScoreWaitCapMinutes(int v) { this.scoreWaitCapMinutes = v; }
+    public int getScoreCreditSlackWeight() { return scoreCreditSlackWeight; }
+    public void setScoreCreditSlackWeight(int v) { this.scoreCreditSlackWeight = v; }
+    public int getScorePenaltyWeight() { return scorePenaltyWeight; }
+    public void setScorePenaltyWeight(int v) { this.scorePenaltyWeight = v; }
 
     public int getMaxPreferences() { return maxPreferences; }
     public void setMaxPreferences(int maxPreferences) { this.maxPreferences = maxPreferences; }

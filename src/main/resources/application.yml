@@ -43,6 +43,21 @@ app:
     rematch-cooldown-seconds: ${APP_MATCHING_REMATCH_COOLDOWN:300}
     # 요청 1건의 희망 분반 최대 개수
     max-preferences: 10
+    # 패널티: 거절 2점, 잠수(만료까지 무응답) 5점. 최근 24시간 누적 10점 이상이면 60분간 매칭 차단.
+    penalty-reject-points: 2
+    penalty-no-response-points: 5
+    penalty-block-threshold-points: 10
+    penalty-window-hours: 24
+    penalty-block-minutes: 60
+    # 만료 세션 자동 처리 (끄려면 APP_MATCHING_EXPIRE_SCHEDULER=false)
+    expire-scheduler-enabled: ${APP_MATCHING_EXPIRE_SCHEDULER:true}
+    expire-scheduler-interval-ms: 5000
+    # 우선순위 점수 = 학년*10 + 기다린 분(최대 120)*1 + 남은 학점 여유*1 - 최근 감점*5
+    score-year-weight: 10
+    score-wait-weight-per-minute: 1
+    score-wait-cap-minutes: 120
+    score-credit-slack-weight: 1
+    score-penalty-weight: 5
   cors:
     # 프론트 주소 (쉼표로 여러 개). 예: CORS_ALLOWED_ORIGINS=http://localhost:5173,http://<프론트서버IP>
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173}

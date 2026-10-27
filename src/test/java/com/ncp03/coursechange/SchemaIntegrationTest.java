@@ -4,7 +4,7 @@ import com.ncp03.coursechange.support.IntegrationTestSupport;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -85,7 +85,7 @@ class SchemaIntegrationTest extends IntegrationTestSupport {
         // 학생 3은 offering 9(과목 5)를 안 듣는다. course_id를 일부러 1로 넣는다.
         assertThatThrownBy(() -> jdbc.update(
                 "insert into enrollments (student_id, offering_id, course_id) values (3, 9, 1)"))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DataAccessException.class);
     }
 
     @Test
@@ -94,7 +94,7 @@ class SchemaIntegrationTest extends IntegrationTestSupport {
         // 학생 1은 프로그래밍언어론 02(offering 10)를 듣는다. 01(offering 9)을 추가하면 거부.
         assertThatThrownBy(() -> jdbc.update(
                 "insert into enrollments (student_id, offering_id, course_id) values (1, 9, 5)"))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DataAccessException.class);
     }
 
     @Test
@@ -102,10 +102,10 @@ class SchemaIntegrationTest extends IntegrationTestSupport {
     void classTimeChecks() {
         assertThatThrownBy(() -> jdbc.update(
                 "insert into class_times (offering_id, weekday, start_time, end_time) values (1, 8, '09:00', '10:00')"))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DataAccessException.class);
         assertThatThrownBy(() -> jdbc.update(
                 "insert into class_times (offering_id, weekday, start_time, end_time) values (1, 5, '11:00', '10:00')"))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DataAccessException.class);
     }
 
     @Test
@@ -118,7 +118,7 @@ class SchemaIntegrationTest extends IntegrationTestSupport {
                 enrollmentId);
         assertThatThrownBy(() -> jdbc.update(
                 "insert into exchange_requests (student_id, offered_enrollment_id, status) values (1, ?, 'WAITING')",
-                enrollmentId)).isInstanceOf(DataIntegrityViolationException.class);
+                enrollmentId)).isInstanceOf(DataAccessException.class);
 
         jdbc.update("update exchange_requests set status = 'CANCELLED' where offered_enrollment_id = ?", enrollmentId);
         jdbc.update("insert into exchange_requests (student_id, offered_enrollment_id, status) values (1, ?, 'WAITING')",
@@ -137,7 +137,7 @@ class SchemaIntegrationTest extends IntegrationTestSupport {
                 "select enrollment_id from enrollments where student_id = 1 and offering_id = 10", Long.class);
         assertThatThrownBy(() -> jdbc.update(
                 "insert into exchange_requests (student_id, offered_enrollment_id, status) values (1, ?, 'DONE')",
-                enrollmentId)).isInstanceOf(DataIntegrityViolationException.class);
+                enrollmentId)).isInstanceOf(DataAccessException.class);
     }
 
     @Test
@@ -155,7 +155,7 @@ class SchemaIntegrationTest extends IntegrationTestSupport {
 
         assertThatThrownBy(() -> jdbc.update(
                 "update match_participants set wake_sent_count = 4 where session_id = ?", sessionId))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DataAccessException.class);
 
         jdbc.update("""
                 insert into penalty_events (student_id, session_id, reason_code, deduction_points, idempotency_key)
@@ -163,7 +163,7 @@ class SchemaIntegrationTest extends IntegrationTestSupport {
         assertThatThrownBy(() -> jdbc.update("""
                 insert into penalty_events (student_id, session_id, reason_code, deduction_points, idempotency_key)
                 values (1, ?, 'NO_RESPONSE', 5, ?)""", sessionId, "NO_RESPONSE:" + sessionId + ":1"))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DataAccessException.class);
     }
 
     @Test

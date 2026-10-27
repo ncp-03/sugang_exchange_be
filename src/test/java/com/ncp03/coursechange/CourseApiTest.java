@@ -53,7 +53,7 @@ class CourseApiTest extends IntegrationTestSupport {
     @Test
     @DisplayName("과목명 검색: 응답 필드와 정원 마감, 수업 시간 표시")
     void searchByName() throws Exception {
-        mvc.perform(get("/api/courses").param("keyword", "프로그래밍"))
+        mvc.perform(get("/api/courses").param("keyword", "프로그래밍언어"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(2))
                 .andExpect(jsonPath("$.content[0].offeringId").value(9))

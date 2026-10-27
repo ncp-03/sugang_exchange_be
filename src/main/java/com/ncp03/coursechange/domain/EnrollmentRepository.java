@@ -59,6 +59,14 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
             """)
     List<Object[]> countByOfferingIds(@Param("offeringIds") Collection<Long> offeringIds);
 
+    /** 여러 학생의 현재 학점 합. 결과 행: [studentId(Long), credits(Long)] */
+    @Query("""
+            select e.student.id, sum(o.credits) from Enrollment e join e.offering o
+            where e.student.id in :studentIds
+            group by e.student.id
+            """)
+    List<Object[]> sumCreditsByStudentIds(@Param("studentIds") Collection<Long> studentIds);
+
     @Query("""
             select coalesce(sum(o.credits), 0) from Enrollment e join e.offering o
             where e.student.id = :studentId

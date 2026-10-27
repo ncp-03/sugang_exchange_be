@@ -51,6 +51,9 @@ public class Student {
     protected Student() {
     }
 
+    /** 패널티로 매칭 이용을 제한한다. */
+    public void blockUntil(LocalDateTime until) { this.blockedUntil = until; }
+
     public Long getId() { return id; }
     public String getStudentNo() { return studentNo; }
     public String getNickname() { return nickname; }

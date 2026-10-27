@@ -65,6 +65,17 @@ public interface ExchangeRequestRepository extends JpaRepository<ExchangeRequest
                                                @Param("wantedOfferingIds") Collection<Long> wantedOfferingIds,
                                                @Param("myGiveOfferingId") Long myGiveOfferingId);
 
+    /** 같은 분반을 (희망 목록 안에) 원하는 대기 중 요청들. 대기열 순위 계산용. */
+    @Query("""
+            select r from ExchangeRequest r
+            join fetch r.student
+            where r.status = com.ncp03.coursechange.domain.RequestStatus.WAITING
+              and exists (
+                    select 1 from ExchangePreference p
+                    where p.request = r and p.targetOffering.id = :offeringId)
+            """)
+    List<ExchangeRequest> findWaitingWantingOffering(@Param("offeringId") Long offeringId);
+
     /**
      * 비관적 락(SELECT ... FOR UPDATE)으로 요청 행을 잠근다.
      * 교착 상태를 피하려고 항상 request_id 오름차순으로 잠근다 — 호출 측에서 ids를 정렬해 넘긴다.
