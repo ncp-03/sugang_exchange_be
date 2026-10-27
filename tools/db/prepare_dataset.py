@@ -64,10 +64,30 @@ def generate():
     print('Generated',manifest['total_synthetic_rows'],'synthetic rows')
     return manifest
 
+def migration_history(cursor):
+    cursor.execute('SELECT version,success FROM flyway_schema_history ORDER BY installed_rank')
+    history=cursor.fetchall()
+    versions=[row['version'] for row in history]
+    if versions not in (['1','2'],['1','2','3']) or not all(row['success']==1 for row in history):
+        raise RuntimeError('Expected successful Flyway V1/V2 or V1/V2/V3 before using fixtures.')
+    return history
+
+
+def initial_password_hash(student_no):
+    # Match V3 and AuthService: only synthetic fixture students use this initial password.
+    return hashlib.sha256(f'{student_no}:{student_no}'.encode('utf-8')).hexdigest()
+
+
+def student_insert_row(row,with_password):
+    return row+[initial_password_hash(row[1])] if with_password else row
+
+
 def apply(db,manifest):
     with db.cursor() as q:
         q.execute(f'USE `{SCHEMA}`');q.execute('SELECT DATABASE() AS name')
-        assert q.fetchone()['name']==SCHEMA
+        if q.fetchone()['name']!=SCHEMA:
+            raise RuntimeError('Refusing to write outside course_change_loadtest.')
+        with_password=migration_history(q)[-1]['version']=='3'
         for table in COLUMNS:
             q.execute(f'SELECT COUNT(*) AS n FROM `{table}`')
             if q.fetchone()['n']!=BASELINE[table]:
@@ -77,16 +97,24 @@ def apply(db,manifest):
         with db.cursor() as q:
             for table,columns in COLUMNS.items():
                 path=HERE/'dataset'/(table+'.csv')
-                assert hashlib.sha256(path.read_bytes()).hexdigest()==manifest['tables'][table]['sha256']
+                if hashlib.sha256(path.read_bytes()).hexdigest()!=manifest['tables'][table]['sha256']:
+                    raise RuntimeError('CSV hash mismatch: '+table)
                 with path.open(encoding='utf-8',newline='') as fp:
-                    reader=csv.reader(fp);assert next(reader)==columns
+                    reader=csv.reader(fp)
+                    if next(reader,None)!=columns:
+                        raise RuntimeError('CSV columns mismatch: '+table)
                     batch=[];done=0
-                    sql=f'INSERT INTO `{SCHEMA}`.`{table}` ('+','.join('`'+c+'`' for c in columns)+') VALUES ('+','.join(['%s']*len(columns))+')'
+                    insert_columns=columns+['password_hash'] if table=='students' and with_password else columns
+                    sql=f'INSERT INTO `{SCHEMA}`.`{table}` ('+','.join('`'+c+'`' for c in insert_columns)+') VALUES ('+','.join(['%s']*len(insert_columns))+')'
                     for row in reader:
+                        if len(row)!=len(columns):
+                            raise RuntimeError('CSV row width mismatch: '+table)
+                        if table=='students':row=student_insert_row(row,with_password)
                         batch.append(row)
                         if len(batch)>=1000:q.executemany(sql,batch);done+=len(batch);batch=[]
                     if batch:q.executemany(sql,batch);done+=len(batch)
-                    assert done==manifest['tables'][table]['added']
+                    if done!=manifest['tables'][table]['added']:
+                        raise RuntimeError('CSV row count mismatch: '+table)
                     print('Inserted',table,done,flush=True)
         db.commit()
         print('Fixture transaction committed; production schema not targeted.')
@@ -107,13 +135,17 @@ def verify(db,manifest):
     report={'schema':SCHEMA,'counts':{},'invariant_violations':{}}
     with db.cursor() as q:
         q.execute(f'USE `{SCHEMA}`')
+        report['flyway']=migration_history(q)
         for table,expected in manifest['tables'].items():
             q.execute(f'SELECT COUNT(*) n FROM `{table}`');actual=q.fetchone()['n']
             report['counts'][table]=actual;assert actual==expected['total'],(table,actual)
         for name,sql in CHECKS.items():
             q.execute(sql);actual=q.fetchone()['n'];report['invariant_violations'][name]=actual;assert actual==0,(name,actual)
-        q.execute('SELECT version,success FROM flyway_schema_history ORDER BY installed_rank')
-        report['flyway']=q.fetchall();assert len(report['flyway'])==2 and all(r['success']==1 for r in report['flyway'])
+        if report['flyway'][-1]['version']=='3':
+            q.execute(f"SELECT COUNT(*) n FROM students WHERE student_id>={FIRST} AND (password_hash IS NULL OR password_hash<>SHA2(CONCAT(student_no, ':', student_no),256))")
+            report['synthetic_password_hash_violations']=q.fetchone()['n']
+            if report['synthetic_password_hash_violations']!=0:
+                raise RuntimeError('Synthetic students have missing or invalid V3 login hashes.')
         q.execute(f'SELECT COUNT(*) n FROM enrollments WHERE student_id={FIRST}')
         report['example_student_enrollments']=q.fetchone()['n'];assert report['example_student_enrollments']==6
         q.execute(f'SELECT COUNT(*) n FROM enrollments WHERE offering_id={FIRST}')
