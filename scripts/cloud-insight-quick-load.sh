@@ -30,6 +30,10 @@ fi
 exec "$k6_bin" run \
   -e PROFILE=lt18 \
   -e BASE_URL="$base_url" \
+  -e AUTH_MODE="${AUTH_MODE:-TOKEN}" \
+  -e STUDENT_ID="${STUDENT_ID:-1}" \
+  -e STUDENT_NO="${STUDENT_NO:-2024000001}" \
+  -e STUDENT_PASSWORD="${STUDENT_PASSWORD:-${STUDENT_NO:-2024000001}}" \
   -e HOT_OFFERING_ID="${HOT_OFFERING_ID:-9}" \
   -e BASELINE_VUS="${BASELINE_VUS:-1}" \
   -e SPIKE_VUS="${SPIKE_VUS:-32}" \

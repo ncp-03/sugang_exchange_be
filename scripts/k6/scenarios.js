@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check, fail, group, sleep } from 'k6';
+import exec from 'k6/execution';
 
 const baseUrl = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
 const studentId = Number(__ENV.STUDENT_ID || 1);
@@ -15,8 +16,15 @@ const spikeVus = Number(__ENV.SPIKE_VUS || 32);
 const hotOfferingId = Number(__ENV.HOT_OFFERING_ID || 9);
 const searchKeyword = __ENV.SEARCH_KEYWORD || '프로그래밍';
 const thinkTime = Number(__ENV.THINK_TIME ?? 1);
+const authMode = (__ENV.AUTH_MODE || 'TOKEN').toUpperCase();
+const studentNo = __ENV.STUDENT_NO || '2024000001';
+const studentPassword = __ENV.STUDENT_PASSWORD || studentNo;
+const writeVus = Number(__ENV.WRITE_VUS || 20);
+const writeIterations = Number(__ENV.WRITE_ITERATIONS || 100);
+const fixtureStart = 100001;
+let tokenCache = {};
 
-const profiles = ['smoke', 'load', 'lt01', 'lt02', 'lt09', 'lt12', 'lt16', 'lt17', 'lt18'];
+const profiles = ['smoke', 'load', 'lt01', 'lt02', 'lt03', 'lt04', 'lt05', 'lt06', 'lt07', 'lt08', 'lt09', 'lt11', 'lt12', 'lt16', 'lt17', 'lt18'];
 if (!profiles.includes(profile)) {
   throw new Error('PROFILE must be one of: ' + profiles.join(', '));
 }
@@ -24,6 +32,7 @@ for (const [name, value] of Object.entries({
   STUDENT_ID: studentId, HOT_OFFERING_ID: hotOfferingId, BROWSE_VUS: browseVus,
   STUDENT_VUS: studentVus, HOT_VUS: hotVus, MIXED_VUS: mixedVus,
   STEP_VUS: stepVus, BASELINE_VUS: baselineVus, SPIKE_VUS: spikeVus,
+  WRITE_VUS: writeVus, WRITE_ITERATIONS: writeIterations,
 })) {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error(name + ' must be a positive integer');
@@ -35,9 +44,24 @@ if (!Number.isFinite(thinkTime) || thinkTime < 0 || !searchKeyword.trim()) {
 if (profile === 'lt18' && baselineVus >= spikeVus) {
   throw new Error('SPIKE_VUS must be greater than BASELINE_VUS');
 }
+if (!['TOKEN', 'DEMO'].includes(authMode)) {
+  throw new Error('AUTH_MODE must be TOKEN or DEMO');
+}
+const writeProfiles = ['lt03', 'lt04', 'lt06', 'lt07', 'lt08'];
+if (writeProfiles.includes(profile) && __ENV.ALLOW_WRITES !== '1') {
+  throw new Error('Write profiles require ALLOW_WRITES=1 on a dedicated load-test database');
+}
+if (['lt03', 'lt06'].includes(profile) && writeIterations > 5000) {
+  throw new Error('WRITE_ITERATIONS must be <= 5000 for these fixture-backed profiles');
+}
 
 function constant(vus, exec) {
   return { executor: 'constant-vus', vus, duration, exec };
+}
+
+function writeBurst(executorName, iterations = writeIterations) {
+  return { executor: 'shared-iterations', vus: writeVus, iterations,
+    maxDuration: __ENV.WRITE_MAX_DURATION || '10m', exec: executorName };
 }
 
 function loadThresholds() {
@@ -55,8 +79,27 @@ function buildOptions() {
       return { scenarios: { course_list_search: constant(browseVus, 'courseListSearch') }, thresholds: loadThresholds() };
     case 'lt02':
       return { scenarios: { hotspot_detail: constant(hotVus, 'hotspotCourse') }, thresholds: loadThresholds() };
+    case 'lt03':
+      return { scenarios: { exchange_registration: writeBurst('exchangeRegistration') },
+        thresholds: { checks: ['rate>0.99'] } };
+    case 'lt04':
+      return { scenarios: { same_enrollment_race: writeBurst('sameEnrollmentRace', writeVus) },
+        thresholds: { checks: ['rate>0.99'] } };
+    case 'lt05':
+      return { scenarios: { queue_ranking: constant(studentVus, 'queueRanking') }, thresholds: loadThresholds() };
+    case 'lt06':
+      return { scenarios: { automatic_matching: writeBurst('automaticMatching') },
+        thresholds: { checks: ['rate>0.99'] } };
+    case 'lt07':
+      return { scenarios: { same_pair_race: writeBurst('samePairRace', writeVus) },
+        thresholds: { checks: ['rate>0.99'] } };
+    case 'lt08':
+      return { scenarios: { simultaneous_accept: writeBurst('simultaneousAccept', 2) },
+        thresholds: { checks: ['rate==1'] } };
     case 'lt09':
       return { scenarios: { student_consistency: constant(studentVus, 'studentConsistency') }, thresholds: loadThresholds() };
+    case 'lt11':
+      return { scenarios: { session_polling: constant(studentVus, 'sessionPolling') }, thresholds: loadThresholds() };
     case 'load':
     case 'lt12':
       return {
@@ -64,6 +107,7 @@ function buildOptions() {
           course_list_search: constant(browseVus, 'courseListSearch'),
           hotspot_detail: constant(hotVus, 'hotspotCourse'),
           student_consistency: constant(studentVus, 'studentConsistency'),
+          session_polling: constant(studentVus, 'sessionPolling'),
         },
         thresholds: loadThresholds(),
       };
@@ -117,6 +161,33 @@ function get(path, headers = {}) {
   const endpoint = path.startsWith('/api/courses/') && path !== '/api/courses/filters'
     ? '/api/courses/{offeringId}' : path.split('?')[0];
   return http.get(`${baseUrl}${path}`, { headers, tags: { endpoint } });
+}
+
+function post(path, body, headers = {}) {
+  return http.post(`${baseUrl}${path}`, body === null ? null : JSON.stringify(body), {
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    tags: { endpoint: path.replace(/\d+/g, '{id}') },
+  });
+}
+
+function syntheticStudentNo(index) {
+  return 'LT20261026' + String(index + 1).padStart(5, '0');
+}
+
+function authHeaders(id, index = null) {
+  if (authMode === 'DEMO') return { 'X-Student-Id': String(id) };
+  const key = String(id);
+  if (!tokenCache[key]) {
+    const no = index === null ? studentNo : syntheticStudentNo(index);
+    const password = index === null ? studentPassword : no;
+    const response = post('/api/auth/login', { studentNo: no, password });
+    const body = json(response);
+    if (response.status !== 200 || !body?.accessToken || body.studentId !== id) {
+      fail(`Login failed for student ${id} (HTTP ${response.status}); check credentials and AUTH_MODE`);
+    }
+    tokenCache[key] = body.accessToken;
+  }
+  return { Authorization: 'Bearer ' + tokenCache[key] };
 }
 
 function isPage(body) {
@@ -174,7 +245,7 @@ function checkHotspotCourse() {
 
 // LT-09: observed enrollment totals and schedules, without a registration request.
 function checkStudentConsistency() {
-  const headers = { 'X-Student-Id': String(studentId) };
+  const headers = authHeaders(studentId);
   const profileResponse = get('/api/students/me', headers);
   const profileBody = json(profileResponse);
   check(profileResponse, {
@@ -199,10 +270,35 @@ function checkStudentConsistency() {
 }
 
 export function setup() {
+  if (writeProfiles.includes(profile)) {
+    const health = get('/actuator/health');
+    if (health.status !== 200 || json(health)?.status !== 'UP') {
+      fail('Write preflight failed: backend is not healthy');
+    }
+    const headers = authHeaders(fixtureStart, 0);
+    const enrollment = get('/api/enrollments/me', headers);
+    const body = json(enrollment);
+    const requests = get('/api/exchange-requests/me', headers);
+    const requestsBody = json(requests);
+    if (enrollment.status !== 200 || body?.studentId !== fixtureStart ||
+        body?.enrollments?.length !== 6 || requests.status !== 200 ||
+        !requestsBody?.requests?.some((item) => item.requestId === fixtureStart)) {
+      fail('Write preflight failed: expected the synthetic course_change_loadtest fixture');
+    }
+    if (profile === 'lt08') {
+      const match = post(`/api/exchange-requests/${fixtureStart}/quick-match`, null, headers);
+      const sessionId = json(match)?.session?.sessionId;
+      if (match.status !== 200 || !sessionId) {
+        fail('LT-08 setup needs a fresh reciprocal pair with WAITING requests');
+      }
+      return { sessionId };
+    }
+    return;
+  }
   if (profile === 'lt18') {
     const courses = get('/api/courses?size=1');
     const hot = get('/api/courses/' + hotOfferingId);
-    const student = get('/api/students/me', { 'X-Student-Id': String(studentId) });
+    const student = get('/api/students/me', authHeaders(studentId));
     if (courses.status !== 200 || !isPage(json(courses)) ||
         hot.status !== 200 || json(hot)?.offeringId !== hotOfferingId ||
         student.status !== 200 || json(student)?.studentId !== studentId) {
@@ -250,8 +346,9 @@ export function apiSmoke() {
   group('documented errors', () => {
     const missingHeader = get('/api/enrollments/me');
     check(missingHeader, {
-      'missing student ID is rejected': (r) =>
-        r.status === 401 && json(r)?.code === 'MISSING_STUDENT_ID',
+      'missing authentication is rejected': (r) =>
+        r.status === 401 && json(r)?.code ===
+          (authMode === 'TOKEN' ? 'MISSING_TOKEN' : 'MISSING_STUDENT_ID'),
     });
 
     const missingCourse = get('/api/courses/999');
@@ -280,6 +377,113 @@ export function hotspotCourse() {
 
 export function studentConsistency() {
   checkStudentConsistency();
+  sleep(thinkTime);
+}
+
+// Synthetic fixture: student i owns six enrollments. The second one has no
+// preloaded exchange request, so registrations do not consume the matching pair.
+function secondEnrollment(index) {
+  return fixtureStart + index * 6 + 1;
+}
+
+function secondTarget(index) {
+  const group = Math.floor(index / 2) % 200;
+  return fixtureStart + (group * 6 + 1) * 2 + (1 - index % 2);
+}
+
+// LT-03: distinct students register requests in a bounded burst.
+export function exchangeRegistration() {
+  const index = exec.scenario.iterationInTest;
+  const id = fixtureStart + index;
+  const response = post('/api/exchange-requests', {
+    offeredEnrollmentId: secondEnrollment(index),
+    wantedOfferingIds: [secondTarget(index)], autoMatch: false,
+  }, authHeaders(id, index));
+  const body = json(response);
+  check(response, { 'LT-03 request entered queue': (r) =>
+    r.status === 201 && body?.status === 'WAITING' &&
+    body.offeredEnrollmentId === secondEnrollment(index) });
+}
+
+// LT-04: all iterations race to register the same student's second enrollment.
+export function sameEnrollmentRace() {
+  const response = post('/api/exchange-requests', {
+    offeredEnrollmentId: secondEnrollment(0),
+    wantedOfferingIds: [secondTarget(0)], autoMatch: false,
+  }, authHeaders(fixtureStart, 0));
+  const body = json(response);
+  check(response, { 'LT-04 created once or rejected duplicate': (r) =>
+    (r.status === 201 && body?.status === 'WAITING') ||
+    (r.status === 409 && body?.code === 'REQUEST_ALREADY_EXISTS') });
+}
+
+// LT-05: ranking is recomputed for existing WAITING requests.
+export function queueRanking() {
+  const index = (__VU - 1) % 10000;
+  const requestId = fixtureStart + index;
+  const response = get(`/api/exchange-requests/${requestId}/queue`,
+    authHeaders(requestId, index));
+  const body = json(response);
+  check(response, { 'LT-05 waiting request has a valid rank': (r) =>
+    r.status === 200 && body?.requestId === requestId &&
+    body.status === 'WAITING' && body.position >= 1 &&
+    body.competitors >= body.position && Number.isInteger(body.score) });
+  sleep(thinkTime);
+}
+
+// LT-06: one request per independent reciprocal pair starts quick matching.
+export function automaticMatching() {
+  const index = exec.scenario.iterationInTest * 2;
+  const requestId = fixtureStart + index;
+  const response = post(`/api/exchange-requests/${requestId}/quick-match`, null,
+    authHeaders(requestId, index));
+  const body = json(response);
+  check(response, { 'LT-06 reciprocal pair created a session': (r) =>
+    r.status === 200 && body?.matched === true &&
+    body.session?.status === 'PENDING' && body.session.participants?.length === 2 });
+}
+
+// LT-07: competing quick-match requests target one reciprocal pair.
+export function samePairRace() {
+  const response = post(`/api/exchange-requests/${fixtureStart}/quick-match`, null,
+    authHeaders(fixtureStart, 0));
+  const body = json(response);
+  check(response, { 'LT-07 match or documented race rejection': (r) =>
+    (r.status === 200 && body?.matched === true && body.session?.sessionId > 0) ||
+    (r.status === 409 && ['EXCHANGE_CONFLICT', 'REQUEST_NOT_MODIFIABLE'].includes(body?.code)) });
+}
+
+// LT-08: two participants accept the same session; the second acceptance swaps seats.
+export function simultaneousAccept(data) {
+  const index = exec.scenario.iterationInTest;
+  const id = fixtureStart + index;
+  const response = post(`/api/match-sessions/${data.sessionId}/accept`, null,
+    authHeaders(id, index));
+  const body = json(response);
+  check(response, { 'LT-08 acceptance recorded': (r) =>
+    r.status === 200 && ['PENDING', 'COMPLETED'].includes(body?.status) });
+}
+
+export function teardown(data) {
+  if (profile !== 'lt08') return;
+  const response = get(`/api/match-sessions/${data.sessionId}`,
+    authHeaders(fixtureStart, 0));
+  check(response, { 'LT-08 session completed after both acceptances': (r) =>
+    r.status === 200 && json(r)?.status === 'COMPLETED' });
+}
+
+// LT-11: repeated session, request and wishlist polling through implemented APIs.
+export function sessionPolling() {
+  const headers = authHeaders(studentId);
+  const sessions = get('/api/match-sessions/me', headers);
+  check(sessions, { 'LT-11 session list is available': (r) =>
+    r.status === 200 && Array.isArray(json(r)) });
+  const requests = get('/api/exchange-requests/me', headers);
+  check(requests, { 'LT-11 exchange request list is available': (r) =>
+    r.status === 200 && Array.isArray(json(r)?.requests) });
+  const wishlists = get('/api/wishlists/me', headers);
+  check(wishlists, { 'LT-11 wishlist is available': (r) =>
+    r.status === 200 && Array.isArray(json(r)?.wishlists) });
   sleep(thinkTime);
 }
 
