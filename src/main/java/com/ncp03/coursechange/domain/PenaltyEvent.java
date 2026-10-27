@@ -45,10 +45,22 @@ public class PenaltyEvent {
     @Column(name = "idempotency_key", nullable = false, length = 100)
     private String idempotencyKey;
 
-    @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
     protected PenaltyEvent() {
+    }
+
+    public static PenaltyEvent of(Student student, MatchSession session, PenaltyReason reason,
+                                  int points, String idempotencyKey, LocalDateTime now) {
+        PenaltyEvent e = new PenaltyEvent();
+        e.student = student;
+        e.session = session;
+        e.reasonCode = reason;
+        e.deductionPoints = points;
+        e.idempotencyKey = idempotencyKey;
+        e.createdAt = now;
+        return e;
     }
 
     public Long getId() { return id; }

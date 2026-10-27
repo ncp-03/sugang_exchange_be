@@ -36,6 +36,16 @@ public class Wishlist {
     protected Wishlist() {
     }
 
+    private Wishlist(Student student, CourseOffering offering) {
+        this.student = student;
+        this.offering = offering;
+    }
+
+    /** 찜 1건을 만든다. created_at은 DB 기본값이 채운다. */
+    public static Wishlist of(Student student, CourseOffering offering) {
+        return new Wishlist(student, offering);
+    }
+
     public Long getId() { return id; }
     public Student getStudent() { return student; }
     public CourseOffering getOffering() { return offering; }
