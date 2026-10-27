@@ -53,7 +53,7 @@ class CourseApiTest extends IntegrationTestSupport {
     @Test
     @DisplayName("과목명 검색: 응답 필드와 정원 마감, 수업 시간 표시")
     void searchByName() throws Exception {
-        mvc.perform(get("/api/courses").param("keyword", "프로그래밍"))
+        mvc.perform(get("/api/courses").param("keyword", "프로그래밍언어"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(2))
                 .andExpect(jsonPath("$.content[0].offeringId").value(9))
@@ -126,7 +126,7 @@ class CourseApiTest extends IntegrationTestSupport {
     @DisplayName("잘못된 파라미터는 400 INVALID_PARAMETER")
     void invalidParameters() throws Exception {
         for (String[] p : new String[][]{
-                {"courseType", "FOO"}, {"weekday", "8"}, {"weekday", "0"}, {"weekday", "abc"},
+                {"courseType", "FOO"}, {"weekday", "6"}, {"weekday", "7"}, {"weekday", "0"}, {"weekday", "abc"},
                 {"size", "0"}, {"size", "101"}, {"page", "-1"}}) {
             mvc.perform(get("/api/courses").param(p[0], p[1]))
                     .andExpect(status().isBadRequest())
@@ -187,7 +187,7 @@ class CourseApiTest extends IntegrationTestSupport {
                 .andExpect(jsonPath("$.courseTypes", hasSize(4)))
                 .andExpect(jsonPath("$.courseTypes[0].value").value("MAJOR_BASIC"))
                 .andExpect(jsonPath("$.courseTypes[0].label").value("전공기초"))
-                .andExpect(jsonPath("$.weekdays", hasSize(6)))
+                .andExpect(jsonPath("$.weekdays", hasSize(5)))
                 .andExpect(jsonPath("$.weekdays[0].value").value("1"))
                 .andExpect(jsonPath("$.weekdays[0].label").value("월"));
     }

@@ -41,11 +41,18 @@ public class Student {
     @Column(name = "blocked_until")
     private LocalDateTime blockedUntil;
 
+    /** SHA2(학번:비밀번호). 로그인 검증에만 쓰고 API 응답에 넣지 않는다. */
+    @Column(name = "password_hash", length = 64, insertable = false, updatable = false)
+    private String passwordHash;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private LocalDateTime createdAt;
 
     protected Student() {
     }
+
+    /** 패널티로 매칭 이용을 제한한다. */
+    public void blockUntil(LocalDateTime until) { this.blockedUntil = until; }
 
     public Long getId() { return id; }
     public String getStudentNo() { return studentNo; }
@@ -53,6 +60,7 @@ public class Student {
     public String getDepartment() { return department; }
     public Integer getYearLevel() { return yearLevel; }
     public Integer getMaxCredits() { return maxCredits; }
+    public String getPasswordHash() { return passwordHash; }
     public LocalDateTime getBlockedUntil() { return blockedUntil; }
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

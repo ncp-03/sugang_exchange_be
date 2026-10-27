@@ -3,7 +3,9 @@ package com.ncp03.coursechange.common.error;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -36,6 +38,22 @@ public class GlobalExceptionHandler {
                 .findFirst()
                 .orElse(ErrorCode.INVALID_PARAMETER.getDefaultMessage());
         return toResponse(ErrorCode.INVALID_PARAMETER, detail);
+    }
+
+    /** @Valid @RequestBody 검증 실패 (POST·PATCH 본문) */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleBodyValidation(MethodArgumentNotValidException e) {
+        String detail = e.getBindingResult().getFieldErrors().stream()
+                .map(f -> f.getField() + ": " + f.getDefaultMessage())
+                .findFirst()
+                .orElse(ErrorCode.INVALID_PARAMETER.getDefaultMessage());
+        return toResponse(ErrorCode.INVALID_PARAMETER, detail);
+    }
+
+    /** 본문이 없거나 JSON 형식이 깨진 경우 */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadable(HttpMessageNotReadableException e) {
+        return toResponse(ErrorCode.INVALID_PARAMETER, "요청 본문(JSON)을 읽을 수 없습니다.");
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
