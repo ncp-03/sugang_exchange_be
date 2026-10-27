@@ -1,0 +1,110 @@
+name: DB fixtures
+
+on:
+  push:
+    paths:
+      - 'tools/db/**'
+      - 'src/main/resources/db/migration/**'
+      - '.github/workflows/db-fixtures.yml'
+  pull_request:
+    paths:
+      - 'tools/db/**'
+      - 'src/main/resources/db/migration/**'
+      - '.github/workflows/db-fixtures.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    name: MySQL fixtures V${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [2, 3]
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: course_change_loadtest
+          MYSQL_USER: course_change
+          MYSQL_PASSWORD: course_change
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot -proot"
+          --health-interval=5s --health-timeout=3s --health-retries=30
+    env:
+      DB_URL: jdbc:mysql://127.0.0.1:3306/course_change_loadtest?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_USERNAME: course_change
+      DB_PASSWORD: course_change
+      APP_MATCHING_EXPIRE_SCHEDULER: 'false'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install fixture driver and run regression tests
+        run: |
+          python -m pip install -r tools/db/requirements.txt
+          python -m unittest discover -s tools/db -p 'test_*.py' -v
+      - name: Apply real Flyway migrations in an isolated MySQL service
+        run: |
+          ./gradlew bootJar --no-daemon
+          # V2 intentionally lacks the V3 entity column. Only this fixture runner skips JPA validation.
+          java -jar build/libs/app.jar --server.address=127.0.0.1 --server.port=18081 \
+            --spring.flyway.target=${{ matrix.target }} --spring.jpa.hibernate.ddl-auto=none > fixture-app.log 2>&1 &
+          python - <<'PY'
+          import time,urllib.error,urllib.request
+          for attempt in range(60):
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:18081/actuator/health',timeout=2) as response:
+                      if response.status==200:break
+              except (OSError,urllib.error.URLError):pass
+              time.sleep(1)
+          else:raise SystemExit('Fixture application did not become healthy')
+          PY
+      - name: Insert and verify all synthetic fixtures
+        run: |
+          python tools/db/prepare_dataset.py generate
+          python tools/db/prepare_dataset.py apply
+          python tools/db/prepare_dataset.py verify
+          if python tools/db/prepare_dataset.py apply; then
+            echo 'Duplicate fixture input unexpectedly succeeded'
+            exit 1
+          fi
+      - name: Verify V3 synthetic-student login
+        if: matrix.target == 3
+        run: |
+          python - <<'PY'
+          import json,urllib.request
+          for number in (1,10000):
+              student_no=f'LT20261026{number:05d}'
+              body=json.dumps({'studentNo':student_no,'password':student_no}).encode()
+              request=urllib.request.Request('http://127.0.0.1:18081/api/auth/login',data=body,headers={'Content-Type':'application/json'})
+              with urllib.request.urlopen(request,timeout=10) as response:
+                  payload=json.load(response)
+                  assert response.status==200 and payload['accessToken']
+                  assert payload['studentId']==100000+number
+          print('First and last synthetic student login passed')
+          PY
+      - name: Fixture verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixture-verification-v${{ matrix.target }}
+          path: |
+            tools/db/generated/dataset-manifest.json
+            tools/db/generated/dataset-verification.json
+            fixture-app.log
