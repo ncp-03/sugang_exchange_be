@@ -1,6 +1,10 @@
 import http from 'k6/http';
 import { check, fail, group, sleep } from 'k6';
 import exec from 'k6/execution';
+import { Counter } from 'k6/metrics';
+
+// LT-07 only: 409 responses whose API error code is EXCHANGE_CONFLICT.
+const conflict409 = new Counter('conflict_409');
 
 const baseUrl = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
 const studentId = Number(__ENV.STUDENT_ID || 1);
@@ -448,6 +452,7 @@ export function samePairRace() {
   const response = post(`/api/exchange-requests/${fixtureStart}/quick-match`, null,
     authHeaders(fixtureStart, 0));
   const body = json(response);
+  conflict409.add(response.status === 409 && body?.code === 'EXCHANGE_CONFLICT' ? 1 : 0);
   check(response, { 'LT-07 match or documented race rejection': (r) =>
     (r.status === 200 && body?.matched === true && body.session?.sessionId > 0) ||
     (r.status === 409 && ['EXCHANGE_CONFLICT', 'REQUEST_NOT_MODIFIABLE'].includes(body?.code)) });
