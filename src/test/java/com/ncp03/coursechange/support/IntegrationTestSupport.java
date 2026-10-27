@@ -31,5 +31,10 @@ public abstract class IntegrationTestSupport {
                 () -> MYSQL.getJdbcUrl() + "?serverTimezone=Asia/Seoul&characterEncoding=UTF-8");
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
+        // 교환처럼 데이터를 실제로 바꾸는 테스트가 끝난 뒤 DB를 되돌릴 수 있도록 clean을 허용한다.
+        // (테스트 컨테이너 전용. 운영 설정에는 영향이 없다.)
+        registry.add("spring.flyway.clean-disabled", () -> "false");
+        // 기존 테스트는 X-Student-Id 헤더를 쓴다. 토큰 동작은 AuthApiTest가 따로 검증한다.
+        registry.add("app.auth.mode", () -> "DEMO");
     }
 }

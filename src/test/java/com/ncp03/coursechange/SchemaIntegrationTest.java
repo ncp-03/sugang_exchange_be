@@ -25,11 +25,11 @@ class SchemaIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("Flyway 마이그레이션 V1, V2가 성공하고 테이블 11개가 생긴다")
+    @DisplayName("Flyway 마이그레이션 V1, V2, V3가 성공하고 테이블 11개가 생긴다")
     void migrationsApplied() {
         List<String> versions = jdbc.queryForList(
                 "select version from flyway_schema_history where success = 1 order by installed_rank", String.class);
-        assertThat(versions).containsExactly("1", "2");
+        assertThat(versions).containsExactly("1", "2", "3");
 
         List<String> tables = jdbc.queryForList("""
                 select table_name from information_schema.tables

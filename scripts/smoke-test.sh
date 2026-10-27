@@ -33,9 +33,18 @@ check "강의 상세"            200 '"offeringId":9'            "$BASE/api/cour
 check "없는 강의"            404 'COURSE_NOT_FOUND'          "$BASE/api/courses/999"
 check "필터 선택지"          200 '"departments"'             "$BASE/api/courses/filters"
 check "학생 목록"            200 '"nickname":"졸린고양이"'    "$BASE/api/students"
-check "내 정보"              200 '"currentCredits":15'       -H "X-Student-Id: 1" "$BASE/api/students/me"
-check "내 수강 목록"         200 '"totalCredits":15'         -H "X-Student-Id: 1" "$BASE/api/enrollments/me"
-check "헤더 없이 내 수강 목록" 401 'MISSING_STUDENT_ID'       "$BASE/api/enrollments/me"
+# 로그인(학번 2024000001, 초기 비밀번호=학번) → 토큰
+login_json=$(curl -s -X POST "$BASE/api/auth/login" -H "Content-Type: application/json" \
+  -d '{"studentNo":"2024000001","password":"2024000001"}')
+TOKEN=$(sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p' <<<"$login_json")
+if [ -z "$TOKEN" ]; then echo "FAIL 로그인: 토큰을 받지 못함. 응답: ${login_json:0:300}"; FAIL=1; fi
+
+check "로그인 실패(비밀번호 틀림)" 401 'INVALID_CREDENTIALS' -X POST "$BASE/api/auth/login" \
+  -H "Content-Type: application/json" -d '{"studentNo":"2024000001","password":"wrong"}'
+check "내 정보"              200 '"currentCredits":15'       -H "Authorization: Bearer $TOKEN" "$BASE/api/students/me"
+check "내 수강 목록"         200 '"totalCredits":15'         -H "Authorization: Bearer $TOKEN" "$BASE/api/enrollments/me"
+check "토큰 없이 내 수강 목록" 401 'MISSING_TOKEN'           "$BASE/api/enrollments/me"
+check "가짜 토큰"            401 'INVALID_TOKEN'             -H "Authorization: Bearer abc.def" "$BASE/api/enrollments/me"
 check "OpenAPI 문서"         200 '/api/enrollments/me'       "$BASE/v3/api-docs"
 check "Swagger UI"           200 'swagger-ui'                "$BASE/swagger-ui/index.html"
 

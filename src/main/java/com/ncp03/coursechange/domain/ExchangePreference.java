@@ -37,6 +37,17 @@ public class ExchangePreference {
     protected ExchangePreference() {
     }
 
+    private ExchangePreference(ExchangeRequest request, CourseOffering targetOffering, Integer preferenceRank) {
+        this.request = request;
+        this.targetOffering = targetOffering;
+        this.preferenceRank = preferenceRank;
+    }
+
+    /** rank는 1부터. 요청 안에서 (분반, rank) 모두 중복되면 DB UNIQUE가 막는다. */
+    public static ExchangePreference of(ExchangeRequest request, CourseOffering targetOffering, int preferenceRank) {
+        return new ExchangePreference(request, targetOffering, preferenceRank);
+    }
+
     public Long getId() { return id; }
     public ExchangeRequest getRequest() { return request; }
     public CourseOffering getTargetOffering() { return targetOffering; }

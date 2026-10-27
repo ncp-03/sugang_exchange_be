@@ -40,8 +40,8 @@ public class CourseController {
             @RequestParam(required = false) String department,
             @Parameter(description = "이수 구분 코드")
             @RequestParam(required = false) CourseType courseType,
-            @Parameter(description = "이 요일에 수업이 있는 강의 (1=월 ... 7=일)", example = "2")
-            @RequestParam(required = false) @Min(1) @Max(7) Integer weekday,
+            @Parameter(description = "이 요일에 수업이 있는 강의 (1=월 ... 5=금)", example = "2")
+            @RequestParam(required = false) @Min(1) @Max(5) Integer weekday,
             @Parameter(description = "페이지 번호 (0부터)", example = "0")
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @Parameter(description = "페이지 크기 (1~100)", example = "20")

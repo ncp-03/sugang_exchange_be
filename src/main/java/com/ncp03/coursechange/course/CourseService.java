@@ -44,7 +44,7 @@ public class CourseService {
         List<CourseFiltersResponse.Option> types = Arrays.stream(CourseType.values())
                 .map(t -> new CourseFiltersResponse.Option(t.name(), t.getLabel()))
                 .toList();
-        List<CourseFiltersResponse.Option> weekdays = IntStream.rangeClosed(1, 6)
+        List<CourseFiltersResponse.Option> weekdays = IntStream.rangeClosed(1, 5)
                 .mapToObj(d -> new CourseFiltersResponse.Option(String.valueOf(d), Weekdays.label(d)))
                 .toList();
         return new CourseFiltersResponse(offeringRepository.findAllDepartments(), types, weekdays);
