@@ -7,7 +7,9 @@ import java.util.List;
 @Schema(description = "검색 필터 선택지 (드롭다운용)")
 public record CourseFiltersResponse(
         @Schema(description = "개설 학과 목록") List<String> departments,
+        @Schema(description = "교수 목록") List<String> professors,
         @Schema(description = "이수 구분 목록") List<Option> courseTypes,
+        @Schema(description = "대상학년 목록") List<Option> targetYears,
         @Schema(description = "요일 목록") List<Option> weekdays
 ) {
     @Schema(description = "선택지 1개")

@@ -49,6 +49,17 @@ public class Enrollment {
     protected Enrollment() {
     }
 
+    private Enrollment(Student student, CourseOffering offering) {
+        this.student = student;
+        this.offering = offering;
+        this.courseId = offering.getCourse().getId();
+    }
+
+    /** 수강신청으로 좌석 1개를 잡는다. enrolled_at은 DB 기본값이 채운다. */
+    public static Enrollment of(Student student, CourseOffering offering) {
+        return new Enrollment(student, offering);
+    }
+
     /** 교환 성공 시 이 좌석을 다른 분반으로 옮긴다. course_id도 함께 맞춘다. */
     public void moveTo(CourseOffering target) {
         this.offering = target;

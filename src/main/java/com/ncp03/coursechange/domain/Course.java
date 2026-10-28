@@ -1,5 +1,6 @@
 package com.ncp03.coursechange.domain;
-
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -32,6 +33,11 @@ public class Course {
     @Column(name = "course_type", nullable = false, length = 20)
     private CourseType courseType;
 
+    /** 대상학년. 화면의 '대상학년' 열과 학년 필터에 쓴다. */
+    @JdbcTypeCode(SqlTypes.TINYINT)
+    @Column(name = "target_year", nullable = false)
+    private Integer targetYear;
+
     protected Course() {
     }
 
@@ -40,4 +46,5 @@ public class Course {
     public String getCourseName() { return courseName; }
     public String getDepartment() { return department; }
     public CourseType getCourseType() { return courseType; }
+        public Integer getTargetYear() { return targetYear; }
 }

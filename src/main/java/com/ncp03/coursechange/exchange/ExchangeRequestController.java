@@ -21,8 +21,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @Tag(name = "교환 요청", description = "보유 강의를 내놓고 희망 분반을 받는 요청의 등록·조회·수정·취소, 그리고 빠른 매칭")
 @RestController
@@ -31,10 +34,33 @@ public class ExchangeRequestController {
 
     private final ExchangeRequestService requestService;
     private final MatchingService matchingService;
+    private final ExchangeEligibilityService eligibilityService;
 
-    public ExchangeRequestController(ExchangeRequestService requestService, MatchingService matchingService) {
+    public ExchangeRequestController(ExchangeRequestService requestService, MatchingService matchingService,
+                                     ExchangeEligibilityService eligibilityService) {
         this.requestService = requestService;
         this.matchingService = matchingService;
+        this.eligibilityService = eligibilityService;
+    }
+
+    @Operation(summary = "교환 쌍 가능 여부 표",
+            description = """
+                    내 수강 내역(내놓을 강의) × 희망 분반(받을 강의)의 모든 칸에 대해
+                    교환이 가능한지와 불가 사유를 한 번에 돌려줍니다. 화면에서 조건을 따로 계산하지 않아도 됩니다.
+
+                    `wantedOfferingIds`를 생략하면 내 찜 목록(희망 순위 순)을 씁니다.
+                    판단 기준은 교환 요청 등록·매칭·확정 때와 같은 검사입니다.
+                    """,
+            security = @SecurityRequirement(name = OpenApiConfig.STUDENT_ID_SCHEME))
+    @ApiResponse(responseCode = "200", description = "성공")
+    @ApiResponse(responseCode = "404", description = "없는 분반 (COURSE_NOT_FOUND)",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/eligibility")
+    public ExchangeEligibilityResponse eligibility(
+            @Parameter(hidden = true) @CurrentStudentId Long studentId,
+            @Parameter(description = "받을 분반 ID 목록. 생략하면 내 찜 목록", example = "9,11")
+            @RequestParam(required = false) List<@Min(1) Long> wantedOfferingIds) {
+        return eligibilityService.eligibility(studentId, wantedOfferingIds);
     }
 
     @Operation(summary = "교환 요청 등록",

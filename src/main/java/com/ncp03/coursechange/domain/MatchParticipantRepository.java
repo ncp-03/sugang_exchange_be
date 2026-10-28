@@ -33,4 +33,16 @@ public interface MatchParticipantRepository extends JpaRepository<MatchParticipa
     List<MatchParticipant> findPendingByStudentId(@Param("studentId") Long studentId);
 
     Optional<MatchParticipant> findBySessionIdAndStudentId(Long sessionId, Long studentId);
+
+    /** 내가 끝낸 교환 (완료된 세션). 최근 것이 먼저. 화면의 '교환 기록'에 쓴다. */
+    @Query("""
+            select p from MatchParticipant p
+            join fetch p.session s
+            join fetch p.giveOffering g join fetch g.course
+            join fetch p.receiveOffering rc join fetch rc.course
+            where p.student.id = :studentId
+              and s.status = com.ncp03.coursechange.domain.SessionStatus.COMPLETED
+            order by s.finishedAt desc, s.id desc
+            """)
+    List<MatchParticipant> findCompletedByStudentId(@Param("studentId") Long studentId);
 }

@@ -23,6 +23,8 @@ public interface CourseOfferingRepository extends JpaRepository<CourseOffering, 
                    or lower(o.professorName) like :keywordPattern)
               and (:department is null or c.department = :department)
               and (:courseType is null or c.courseType = :courseType)
+              and (:professorName is null or o.professorName = :professorName)
+              and (:targetYear is null or c.targetYear = :targetYear)
               and (:weekday is null or exists (
                      select 1 from ClassTime t where t.offering = o and t.weekday = :weekday))
             order by c.courseCode asc, o.sectionNo asc
@@ -35,12 +37,16 @@ public interface CourseOfferingRepository extends JpaRepository<CourseOffering, 
                    or lower(o.professorName) like :keywordPattern)
               and (:department is null or c.department = :department)
               and (:courseType is null or c.courseType = :courseType)
+              and (:professorName is null or o.professorName = :professorName)
+              and (:targetYear is null or c.targetYear = :targetYear)
               and (:weekday is null or exists (
                      select 1 from ClassTime t where t.offering = o and t.weekday = :weekday))
             """)
     Page<CourseOffering> search(@Param("keywordPattern") String keywordPattern,
                                 @Param("department") String department,
                                 @Param("courseType") CourseType courseType,
+                                @Param("professorName") String professorName,
+                                @Param("targetYear") Integer targetYear,
                                 @Param("weekday") Integer weekday,
                                 Pageable pageable);
 
@@ -49,4 +55,12 @@ public interface CourseOfferingRepository extends JpaRepository<CourseOffering, 
 
     @Query("select distinct c.department from Course c order by c.department")
     List<String> findAllDepartments();
+
+    /** 교수 필터 선택지. 분반에 들어 있는 교수명을 가나다순으로 모은다. */
+    @Query("select distinct o.professorName from CourseOffering o order by o.professorName")
+    List<String> findAllProfessors();
+
+    /** 학년 필터 선택지. 실제로 개설된 과목의 대상학년만 보여 준다. */
+    @Query("select distinct c.targetYear from Course c order by c.targetYear")
+    List<Integer> findAllTargetYears();
 }

@@ -15,6 +15,7 @@ public record CourseResponse(
         @Schema(description = "분반", example = "01") String sectionNo,
         @Schema(description = "교수명", example = "서교수") String professorName,
         @Schema(description = "개설 학과", example = "컴퓨터공학과") String department,
+        @Schema(description = "대상학년", example = "3") int targetYear,
         @Schema(description = "이수 구분 코드", example = "MAJOR_ELECTIVE") CourseType courseType,
         @Schema(description = "이수 구분 한글", example = "전공선택") String courseTypeLabel,
         @Schema(description = "학점", example = "3") int credits,
@@ -31,7 +32,8 @@ public record CourseResponse(
         var c = o.getCourse();
         return new CourseResponse(
                 o.getId(), c.getId(), c.getCourseCode(), c.getCourseName(), o.getSectionNo(),
-                o.getProfessorName(), c.getDepartment(), c.getCourseType(), c.getCourseType().getLabel(),
+                o.getProfessorName(), c.getDepartment(), c.getTargetYear(),
+                c.getCourseType(), c.getCourseType().getLabel(),
                 o.getCredits(), o.getCapacity(), enrolledCount, enrolledCount >= o.getCapacity(),
                 o.getClassroom(), schedules, ScheduleFormatter.format(schedules), exchange);
     }
