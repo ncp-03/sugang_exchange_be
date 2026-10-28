@@ -1,0 +1,21 @@
+# API 서버(Private)의 /etc/systemd/system/course-change.service 로 저장
+[Unit]
+Description=Course Change API (Spring Boot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=course
+Group=course
+WorkingDirectory=/opt/course-change
+EnvironmentFile=/etc/course-change.env
+# 힙 크기는 서버 메모리에 맞춰 조정 (예: 2GB 서버면 -Xmx1g)
+ExecStart=/usr/bin/java -Xms256m -Xmx768m -jar /opt/course-change/app.jar
+# Spring Boot는 종료 시 143을 반환하므로 정상 종료로 취급
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
