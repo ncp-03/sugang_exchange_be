@@ -9,3 +9,9 @@ bin/
 .DS_Store
 *.log
 .env
+
+# SSH 키
+deploy_key
+deploy_key.pub
+ncp_deploy_key*
+*.pem
