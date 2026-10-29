@@ -64,6 +64,9 @@ ssh-keygen -t ed25519 -f api_deploy_key -N "" -C "github-actions-api"
 
 위 5개 비밀값은 `ncp-03/sugang_exchange_be` 저장소에 등록했습니다. 현재 기본 브랜치는 `main`입니다 (10/29 `wip/day22`에서 이름 변경). `.github/workflows/deploy.yml`의 수동 실행 `deploy=false`에서 Vue 경유 두 API SSH 접속을 확인했습니다. `main`의 CI 성공 뒤에는 두 API 서버에 순차 자동 배포됩니다. 수동 실행은 Actions → Deploy → Run workflow에서 `deploy=true`를 선택하면 배포하고, 기본값 `false`에서는 SSH만 점검합니다.
 
+## 4-1. 셀프호스티드 러너 (22번 닫기)
+Vue 서버에 GitHub Actions 러너를 설치하면 배포에 인바운드 SSH가 필요 없다. 설치·전환 순서는 [runner/README.md](runner/README.md). 저장소 변수 `DEPLOY_VIA_RUNNER=true`일 때만 러너를 쓰고, 없으면 위 SSH 방식 그대로다.
+
 ## 5. 시연 DB 고정 (10/29 추가)
 - 배포 워크플로는 배포 전에 두 API 서버의 `/etc/course-change.env` `DB_URL`을 읽어 DB 이름이 `course_change`(시연 DB)인지 확인한다. 아니면 **배포를 멈춘다.**
 - 부하테스트 때문에 `course_change_loadtest`로 바꿨다면, 끝난 뒤 반드시 `DB_URL`을 `.../course_change?...`로 되돌리고 `systemctl restart course-change`.
