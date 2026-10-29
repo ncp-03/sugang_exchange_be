@@ -90,11 +90,22 @@ INSERT INTO wishlists (student_id, offering_id, preference_rank) VALUES
     (1,  5, 5),   -- 컴퓨터네트워크 01
     (1, 18, 6);   -- 웹프로그래밍 01
 
--- 바쁜다람쥐: 프로그래밍언어론 02를 찜 → 맞교환 내 페이지에서 '01 내놓고 02 받기' 쌍을 바로 고를 수 있다.
-INSERT INTO wishlists (student_id, offering_id, preference_rank) VALUES
-    (2, 10, 1);
+-- ※ 찜 = 수강신청 '수강희망과목'(희과담). 같은 테이블이라 수강신청에서 담은 과목이 맞교환 찜에 그대로 나온다.
 
--- 체험 계정: 상대 분반을 찜 (A는 02, B는 01)
+-- 바쁜다람쥐: 프로그래밍언어론 02가 1순위 → 맞교환 내 페이지에서 '01 내놓고 02 받기' 쌍을 바로 고를 수 있다.
+--   2·3순위는 체험 쌍·배경 요청과 겹치지 않는 단일 분반 과목 (엇갈린 매칭이 생기지 않음)
+INSERT INTO wishlists (student_id, offering_id, preference_rank) VALUES
+    (2, 10, 1),   -- 프로그래밍언어론 02
+    (2, 18, 2),   -- 웹프로그래밍 01
+    (2, 17, 3);   -- 글쓰기와 소통 01
+
+-- 체험 계정: 1순위 = 상대 분반 (A는 02, B는 01), 2·3순위 = 희과담 예시 (웹프로그래밍 01, 글쓰기와 소통 01)
+--   2·3순위 과목은 교환 요청을 낸 사람이 없어 누구와도 매칭되지 않는다.
+INSERT INTO wishlists (student_id, offering_id, preference_rank)
+SELECT s.student_id, x.offering_id, x.preference_rank
+FROM students s CROSS JOIN (SELECT 18 AS offering_id, 2 AS preference_rank UNION ALL SELECT 17, 3) x
+WHERE s.department = '체험';
+
 INSERT INTO wishlists (student_id, offering_id, preference_rank)
 SELECT s.student_id, t.offering_id, 1
 FROM students s JOIN (
@@ -146,7 +157,9 @@ SELECT '졸린고양이 수강내역 (0)' AS check_name, COUNT(*) AS value
 FROM enrollments WHERE student_id = 1
 UNION ALL SELECT '졸린고양이 희망과목 (6)', COUNT(*) FROM wishlists WHERE student_id = 1
 UNION ALL SELECT '다람쥐가 프언01 보유 (1)', COUNT(*) FROM enrollments WHERE student_id = 2 AND offering_id = 9
-UNION ALL SELECT '다람쥐 희망과목 (1)', COUNT(*) FROM wishlists WHERE student_id = 2
+UNION ALL SELECT '다람쥐 희망과목 (3)', COUNT(*) FROM wishlists WHERE student_id = 2
+UNION ALL SELECT '체험 계정 희망과목 (30)', COUNT(*) FROM wishlists w JOIN students s ON s.student_id = w.student_id
+          WHERE s.department = '체험'
 UNION ALL SELECT '체험 계정 (10)', COUNT(*) FROM students WHERE department = '체험'
 UNION ALL SELECT '체험 계정 수강 (10)', COUNT(*) FROM enrollments e JOIN students s ON s.student_id = e.student_id
           WHERE s.department = '체험'
