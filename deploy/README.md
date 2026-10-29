@@ -64,7 +64,14 @@ ssh-keygen -t ed25519 -f api_deploy_key -N "" -C "github-actions-api"
 
 위 5개 비밀값은 `ncp-03/sugang_exchange_be` 저장소에 등록했습니다. 현재 기본 브랜치는 `main`입니다 (10/29 `wip/day22`에서 이름 변경). `.github/workflows/deploy.yml`의 수동 실행 `deploy=false`에서 Vue 경유 두 API SSH 접속을 확인했습니다. `main`의 CI 성공 뒤에는 두 API 서버에 순차 자동 배포됩니다. 수동 실행은 Actions → Deploy → Run workflow에서 `deploy=true`를 선택하면 배포하고, 기본값 `false`에서는 SSH만 점검합니다.
 
-## 5. 문제 확인
+## 5. 시연 DB 고정 (10/29 추가)
+- 배포 워크플로는 배포 전에 두 API 서버의 `/etc/course-change.env` `DB_URL`을 읽어 DB 이름이 `course_change`(시연 DB)인지 확인한다. 아니면 **배포를 멈춘다.**
+- 부하테스트 때문에 `course_change_loadtest`로 바꿨다면, 끝난 뒤 반드시 `DB_URL`을 `.../course_change?...`로 되돌리고 `systemctl restart course-change`.
+- 부하테스트 중에 꼭 배포해야 하면: Actions → Deploy → Run workflow에서 `allow_loadtest_db` 체크.
+- 시연 데이터 초기화: Actions → Deploy → Run workflow에서 `reset_demo` 체크 (`deploy`를 끄면 초기화만 한다). API 01에서 `tools/db/seed_demo.sql`을 `course_change`에만 실행한다. push 자동 배포는 데이터를 건드리지 않는다.
+- 오토스케일링 서버 이미지도 `DB_URL`이 `course_change`인 상태에서 만들어야 한다.
+
+## 6. 문제 확인
 - `bastion ok`가 안 찍힘 → Vue 서버 22번 ACG 또는 키 불일치
 - `api1` 접속 실패 → API 서버 22번이 Vue 서버 ACG에서 열렸는지, authorized_keys에 공개키가 있는지
 - `health FAILED` → `journalctl -u course-change -n 100` 로 로그 확인 (DB 접속·환경변수 오류가 대부분)
