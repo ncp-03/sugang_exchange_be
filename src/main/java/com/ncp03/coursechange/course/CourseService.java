@@ -28,9 +28,11 @@ public class CourseService {
     }
 
     public PageResponse<CourseResponse> search(String keyword, String department, CourseType courseType,
+                                               String professor, Integer targetYear,
                                                Integer weekday, int page, int size) {
         Page<CourseOffering> result = offeringRepository.search(
-                toLikePattern(keyword), blankToNull(department), courseType, weekday, PageRequest.of(page, size));
+                toLikePattern(keyword), blankToNull(department), courseType,
+                blankToNull(professor), targetYear, weekday, PageRequest.of(page, size));
         return PageResponse.of(result, assembler.toResponses(result.getContent()));
     }
 
@@ -47,7 +49,11 @@ public class CourseService {
         List<CourseFiltersResponse.Option> weekdays = IntStream.rangeClosed(1, 5)
                 .mapToObj(d -> new CourseFiltersResponse.Option(String.valueOf(d), Weekdays.label(d)))
                 .toList();
-        return new CourseFiltersResponse(offeringRepository.findAllDepartments(), types, weekdays);
+        List<CourseFiltersResponse.Option> years = offeringRepository.findAllTargetYears().stream()
+                .map(y -> new CourseFiltersResponse.Option(String.valueOf(y), y + "학년"))
+                .toList();
+        return new CourseFiltersResponse(offeringRepository.findAllDepartments(),
+                offeringRepository.findAllProfessors(), types, years, weekdays);
     }
 
     /** LIKE 특수문자(%, _, \)는 글자 그대로 검색되도록 이스케이프한다. */

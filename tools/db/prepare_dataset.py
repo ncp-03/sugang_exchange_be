@@ -68,8 +68,9 @@ def migration_history(cursor):
     cursor.execute('SELECT version,success FROM flyway_schema_history ORDER BY installed_rank')
     history=cursor.fetchall()
     versions=[row['version'] for row in history]
-    if versions not in (['1','2'],['1','2','3']) or not all(row['success']==1 for row in history):
-        raise RuntimeError('Expected successful Flyway V1/V2 or V1/V2/V3 before using fixtures.')
+    # V4(courses.target_year, wishlists.preference_rank)는 두 컬럼 모두 기본값이 있어 CSV 적재·검증에 영향이 없다.
+    if versions not in (['1','2'],['1','2','3'],['1','2','3','4']) or not all(row['success']==1 for row in history):
+        raise RuntimeError('Expected successful Flyway V1/V2, V1~V3 or V1~V4 before using fixtures.')
     return history
 
 
@@ -87,7 +88,7 @@ def apply(db,manifest):
         q.execute(f'USE `{SCHEMA}`');q.execute('SELECT DATABASE() AS name')
         if q.fetchone()['name']!=SCHEMA:
             raise RuntimeError('Refusing to write outside course_change_loadtest.')
-        with_password=migration_history(q)[-1]['version']=='3'
+        with_password=int(migration_history(q)[-1]['version'])>=3
         for table in COLUMNS:
             q.execute(f'SELECT COUNT(*) AS n FROM `{table}`')
             if q.fetchone()['n']!=BASELINE[table]:
@@ -141,7 +142,7 @@ def verify(db,manifest):
             report['counts'][table]=actual;assert actual==expected['total'],(table,actual)
         for name,sql in CHECKS.items():
             q.execute(sql);actual=q.fetchone()['n'];report['invariant_violations'][name]=actual;assert actual==0,(name,actual)
-        if report['flyway'][-1]['version']=='3':
+        if int(report['flyway'][-1]['version'])>=3:
             q.execute(f"SELECT COUNT(*) n FROM students WHERE student_id>={FIRST} AND (password_hash IS NULL OR password_hash<>SHA2(CONCAT(student_no, ':', student_no),256))")
             report['synthetic_password_hash_violations']=q.fetchone()['n']
             if report['synthetic_password_hash_violations']!=0:

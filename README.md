@@ -28,7 +28,7 @@ docker compose down -v      # 데이터까지 지우고 처음부터
 ```bash
 ./gradlew bootRun
 ```
-서버가 뜨면 Flyway가 V1(테이블 11개), V2(가상 학생 10명·강의 21개 등), V3(로그인용 비밀번호 해시)를 자동 적용합니다.
+서버가 뜨면 Flyway가 V1(테이블 11개), V2(가상 학생 10명·강의 21개 등), V3(로그인용 비밀번호 해시), V4(대상학년·찜 희망 순위)를 자동 적용합니다.
 
 - Swagger UI: http://localhost:8080/swagger-ui.html
 - 헬스체크: http://localhost:8080/actuator/health
@@ -79,13 +79,14 @@ java -jar app.jar --app.matching.lock-mode=PESSIMISTIC
 | 구분 | 메서드·경로 | 설명 |
 |---|---|---|
 | 인증 | `POST /api/auth/login` | 학번·비밀번호 로그인, 토큰 발급 |
-| 강의 | `GET /api/courses`, `/api/courses/filters`, `/api/courses/{offeringId}` | 검색·필터·상세 (요일은 1~5, 월~금) |
+| 강의 | `GET /api/courses`, `/api/courses/filters`, `/api/courses/{offeringId}` | 검색·필터·상세 (학과·교수·대상학년·이수구분·요일) |
 | 학생 | `GET /api/students`, `/api/students/me` | 학생 목록, 내 정보 |
-| 수강 | `GET /api/enrollments/me` | 내 수강 목록 |
-| 찜 | `GET /api/wishlists/me`, `POST /api/wishlists`, `DELETE /api/wishlists/{offeringId}` | 하트(분반 단위) |
+| 수강 | `GET /api/enrollments/me`, `POST /api/enrollments`, `DELETE /api/enrollments/{enrollmentId}` | 내 수강 목록, 수강신청·수강삭제 |
+| 찜 | `GET /api/wishlists/me`, `POST /api/wishlists`, `PATCH /api/wishlists/order`, `DELETE /api/wishlists/{offeringId}` | 하트(분반 단위)와 희망 순위 |
+| 교환 조건 | `GET /api/exchange-requests/eligibility` | 교환 쌍(내 수강 × 희망 분반) 가능 여부·사유 표 |
 | 교환 요청 | `POST /api/exchange-requests`, `GET /api/exchange-requests/me`, `GET·PATCH·DELETE /api/exchange-requests/{id}` | 등록·조회·희망 수정·취소 |
 | 대기열·매칭 | `GET /api/exchange-requests/{id}/queue`, `POST /api/exchange-requests/{id}/quick-match` | 대기열 순위, 빠른 매칭 |
-| 매칭 세션 | `GET /api/match-sessions/me`, `GET /api/match-sessions/{id}`, `POST .../accept`, `.../reject`, `.../wake` | 동의·거절·깨우기(최대 3회) |
+| 매칭 세션 | `GET /api/match-sessions/me`, `/me/history`, `GET /api/match-sessions/{id}`, `POST .../accept`, `.../reject`, `.../wake` | 진행 중 매칭, 교환 기록, 동의·거절·깨우기(최대 3회) |
 | 인프라 | `GET /actuator/health` | 헬스체크 |
 
 ## 구현 현황
@@ -96,7 +97,9 @@ java -jar app.jar --app.matching.lock-mode=PESSIMISTIC
 | 강의 목록·검색·상세·필터 | 완료 |
 | 학번·비밀번호 로그인, 토큰 인증 | 완료 |
 | 내 정보, 내 수강 목록 | 완료 |
-| 찜(하트) | 완료 |
+| 찜(하트), 희망 순위 저장 | 완료 |
+| 수강신청·수강삭제 (정원·중복·학점·시간표 검사) | 완료 |
+| 교환 쌍 가능 여부 표 (화면 미리보기용) | 완료 |
 | 교환 요청 등록·수정·취소 (희망 분반 우선순위) | 완료 |
 | 빠른 매칭 (서로 원하는 1:1, 학점·시간표·같은 과목 검사) | 완료 |
 | 매칭 세션(동의·거절·깨우기·만료), 한 트랜잭션 좌석 교환 | 완료 |
@@ -130,4 +133,4 @@ src/main/resources/db/migration/   Flyway 스키마·샘플 데이터
 loadtest/                          k6 시나리오, 초기화·검증 SQL
 ```
 
-DB를 바꿀 때는 이미 적용된 `V1`~`V3` 파일을 고치지 말고 `V4__설명.sql`처럼 새 파일을 추가합니다. (적용된 파일을 수정하면 Flyway 체크섬 오류가 납니다.)
+DB를 바꿀 때는 이미 적용된 `V1`~`V4` 파일을 고치지 말고 `V4__설명.sql`처럼 새 파일을 추가합니다. (적용된 파일을 수정하면 Flyway 체크섬 오류가 납니다.)

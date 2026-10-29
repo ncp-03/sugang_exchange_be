@@ -16,6 +16,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.List;
 
 /**
@@ -57,7 +60,7 @@ public class WishlistService {
             CourseResponse course = courses.get(i);
             boolean enrolled = enrollmentRepository
                     .existsByStudentIdAndOfferingId(studentId, w.getOffering().getId());
-            items.add(new WishlistItemResponse(w.getId(), w.getCreatedAt(), enrolled, course));
+            items.add(new WishlistItemResponse(w.getId(), w.getPreferenceRank(), w.getCreatedAt(), enrolled, course));
         }
         return new MyWishlistsResponse(student.getId(), items.size(), items);
     }
@@ -82,11 +85,13 @@ public class WishlistService {
         Wishlist saved;
         try {
             // UNIQUE(student_id, offering_id)가 최종 방어선. 동시에 두 번 눌러도 1건만 남는다.
-            saved = wishlistRepository.saveAndFlush(Wishlist.of(student, offering));
+            // 새로 찜한 분반은 희망 순위의 맨 뒤로 들어간다. 순서는 PATCH /api/wishlists/order 로 바꾼다.
+            int nextRank = wishlistRepository.findMaxRankByStudentId(studentId) + 1;
+            saved = wishlistRepository.saveAndFlush(Wishlist.of(student, offering, nextRank));
         } catch (DataIntegrityViolationException e) {
             throw new ApiException(ErrorCode.WISHLIST_ALREADY_EXISTS);
         }
-        return new WishlistItemResponse(saved.getId(), saved.getCreatedAt(), false,
+        return new WishlistItemResponse(saved.getId(), saved.getPreferenceRank(), saved.getCreatedAt(), false,
                 courseAssembler.toResponse(offering));
     }
 
@@ -96,5 +101,43 @@ public class WishlistService {
         Wishlist wishlist = wishlistRepository.findByStudentIdAndOfferingId(studentId, offeringId)
                 .orElseThrow(() -> new ApiException(ErrorCode.WISHLIST_NOT_FOUND));
         wishlistRepository.delete(wishlist);
+        // 지운 자리를 메워 1, 2, 3... 이 이어지게 다시 매긴다.
+        renumber(studentId, wishlist.getId());
+    }
+
+    /**
+     * 희망 순위를 통째로 바꾼다. 화면의 찜 목록 순서를 그대로 보내면 된다 (첫 번째가 1순위).
+     * 목록이 서버와 어긋나면(사이에 찜을 추가·삭제했다면) 400으로 거절하고 다시 불러오게 한다.
+     */
+    @Transactional
+    public MyWishlistsResponse reorder(Long studentId, List<Long> offeringIds) {
+        studentService.getStudent(studentId);
+        List<Wishlist> wishlists = wishlistRepository.findAllByStudentIdWithOffering(studentId);
+        Map<Long, Wishlist> byOffering = new HashMap<>();
+        for (Wishlist w : wishlists) {
+            byOffering.put(w.getOffering().getId(), w);
+        }
+        if (new HashSet<>(offeringIds).size() != offeringIds.size()) {
+            throw new ApiException(ErrorCode.INVALID_PARAMETER, "offeringIds에 같은 분반이 두 번 들어 있습니다.");
+        }
+        if (offeringIds.size() != wishlists.size() || !byOffering.keySet().containsAll(offeringIds)) {
+            throw new ApiException(ErrorCode.INVALID_PARAMETER,
+                    "찜 목록 전체를 순서대로 보내 주세요. 현재 찜은 " + wishlists.size() + "개입니다.");
+        }
+        int rank = 1;
+        for (Long offeringId : offeringIds) {
+            byOffering.get(offeringId).changeRank(rank++);
+        }
+        return myWishlists(studentId);
+    }
+
+    /** 남은 찜의 순위를 1부터 다시 매긴다. */
+    private void renumber(Long studentId, Long removedId) {
+        int rank = 1;
+        for (Wishlist w : wishlistRepository.findAllByStudentIdWithOffering(studentId)) {
+            if (!w.getId().equals(removedId)) {
+                w.changeRank(rank++);
+            }
+        }
     }
 }

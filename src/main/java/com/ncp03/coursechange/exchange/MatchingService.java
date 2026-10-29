@@ -15,6 +15,7 @@ import com.ncp03.coursechange.domain.MatchSession;
 import com.ncp03.coursechange.domain.MatchSessionRepository;
 import com.ncp03.coursechange.domain.PenaltyReason;
 import com.ncp03.coursechange.domain.RequestStatus;
+import com.ncp03.coursechange.domain.ResponseStatus;
 import com.ncp03.coursechange.domain.Student;
 import com.ncp03.coursechange.student.StudentService;
 import jakarta.persistence.EntityManager;
@@ -320,7 +321,11 @@ public class MatchingService {
         return assembler.toResponse(session, participants, studentId, now);
     }
 
-    /** 거절. 세션을 끝내고 양쪽 요청을 대기열로 되돌린다. */
+    /**
+     * 거절·매칭 취소. 세션을 끝내고 양쪽 요청을 대기열로 되돌린다.
+     * 내가 이미 확정(동의)했어도 상대가 아직 확정하지 않아 세션이 진행 중이면 취소할 수 있다.
+     * (양쪽이 모두 확정하면 그 순간 교환이 실행되고 세션이 끝나므로 취소할 수 없다.)
+     */
     @Transactional
     public MatchSessionResponse reject(Long studentId, Long sessionId) {
         LocalDateTime now = LocalDateTime.now();
@@ -328,7 +333,7 @@ public class MatchingService {
         List<MatchParticipant> participants = participantRepository.findBySessionIdWithAll(sessionId);
 
         MatchParticipant me = findMe(participants, studentId);
-        if (me.hasResponded()) {
+        if (me.getResponseStatus() == ResponseStatus.REJECTED) {
             throw new ApiException(ErrorCode.ALREADY_RESPONDED);
         }
         me.reject(now);

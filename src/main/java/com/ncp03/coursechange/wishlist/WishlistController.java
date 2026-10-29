@@ -15,6 +15,7 @@ import jakarta.validation.constraints.Min;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -72,5 +73,19 @@ public class WishlistController {
     public void remove(@Parameter(hidden = true) @CurrentStudentId Long studentId,
                        @PathVariable @Min(1) Long offeringId) {
         wishlistService.remove(studentId, offeringId);
+    }
+
+    @Operation(summary = "찜 희망 순위 변경",
+            description = """
+                    화면의 찜 목록 순서를 그대로 보냅니다. 배열의 첫 번째가 1순위입니다.
+                    교환 요청을 만들 때 이 순서가 희망 분반의 우선순위가 됩니다.
+                    목록이 서버와 다르면(그 사이 찜을 추가·삭제했다면) 400 INVALID_PARAMETER.
+                    """,
+            security = @SecurityRequirement(name = OpenApiConfig.STUDENT_ID_SCHEME))
+    @ApiResponse(responseCode = "200", description = "바뀐 찜 목록")
+    @PatchMapping("/order")
+    public MyWishlistsResponse reorder(@Parameter(hidden = true) @CurrentStudentId Long studentId,
+                                       @Valid @RequestBody WishlistReorderRequest body) {
+        return wishlistService.reorder(studentId, body.offeringIds());
     }
 }

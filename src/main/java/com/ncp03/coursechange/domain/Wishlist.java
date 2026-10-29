@@ -33,21 +33,32 @@ public class Wishlist {
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    /** 희망 순위. 1이 가장 받고 싶은 분반. 교환 요청을 만들 때 이 순서가 우선순위가 된다. */
+    @Column(name = "preference_rank", nullable = false)
+    private int preferenceRank;
+
     protected Wishlist() {
     }
 
-    private Wishlist(Student student, CourseOffering offering) {
+    private Wishlist(Student student, CourseOffering offering, int preferenceRank) {
         this.student = student;
         this.offering = offering;
+        this.preferenceRank = preferenceRank;
     }
 
     /** 찜 1건을 만든다. created_at은 DB 기본값이 채운다. */
-    public static Wishlist of(Student student, CourseOffering offering) {
-        return new Wishlist(student, offering);
+    public static Wishlist of(Student student, CourseOffering offering, int preferenceRank) {
+        return new Wishlist(student, offering, preferenceRank);
+    }
+
+    /** 희망 순위를 바꾼다 (1부터). */
+    public void changeRank(int preferenceRank) {
+        this.preferenceRank = preferenceRank;
     }
 
     public Long getId() { return id; }
     public Student getStudent() { return student; }
     public CourseOffering getOffering() { return offering; }
     public LocalDateTime getCreatedAt() { return createdAt; }
+    public int getPreferenceRank() { return preferenceRank; }
 }

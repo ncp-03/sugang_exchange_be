@@ -20,6 +20,8 @@ public enum ErrorCode {
     WISHLIST_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 찜한 분반입니다."),
     WISHLIST_NOT_FOUND(HttpStatus.NOT_FOUND, "찜 목록에 없는 분반입니다."),
     ALREADY_ENROLLED(HttpStatus.CONFLICT, "이미 수강 중인 분반입니다."),
+    COURSE_FULL(HttpStatus.CONFLICT, "정원이 모두 찼습니다."),
+    ENROLLMENT_IN_EXCHANGE(HttpStatus.CONFLICT, "교환 요청이 진행 중인 강의는 삭제할 수 없습니다. 먼저 교환 요청을 취소해 주세요."),
 
     // ---------- 교환 요청 ----------
     ENROLLMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 수강 내역입니다."),

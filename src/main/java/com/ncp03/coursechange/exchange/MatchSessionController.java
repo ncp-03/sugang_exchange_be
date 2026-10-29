@@ -25,9 +25,20 @@ import java.util.List;
 public class MatchSessionController {
 
     private final MatchingService matchingService;
+    private final ExchangeHistoryService historyService;
 
-    public MatchSessionController(MatchingService matchingService) {
+    public MatchSessionController(MatchingService matchingService, ExchangeHistoryService historyService) {
         this.matchingService = matchingService;
+        this.historyService = historyService;
+    }
+
+    @Operation(summary = "내 교환 기록",
+            description = "완료된 교환만 최근 순으로 돌려줍니다. 준 분반·받은 분반·완료 시각·상대 닉네임이 들어 있습니다.",
+            security = @SecurityRequirement(name = OpenApiConfig.STUDENT_ID_SCHEME))
+    @ApiResponse(responseCode = "200", description = "성공")
+    @GetMapping("/me/history")
+    public ExchangeHistoryResponse history(@Parameter(hidden = true) @CurrentStudentId Long studentId) {
+        return historyService.myHistory(studentId);
     }
 
     @Operation(summary = "내 진행 중 매칭",
