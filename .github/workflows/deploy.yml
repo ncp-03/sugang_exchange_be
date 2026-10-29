@@ -208,18 +208,34 @@ jobs:
       - name: 시연 DB 초기화 (seed_demo.sql)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.reset_demo }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           scp -F "$SSHCFG" tools/db/seed_demo.sql api1:/tmp/seed_demo.sql
-          ssh -F "$SSHCFG" api1 'bash -s' <<'REMOTE'
+          ssh -F "$SSHCFG" api1 'bash -s' > seed.log 2>&1 <<'REMOTE'
           set -euo pipefail
           SUDO=""; [ "$(id -u)" != 0 ] && SUDO="sudo"
+          if ! command -v mysql >/dev/null 2>&1; then
+            echo "mysql 클라이언트가 없어 설치합니다 (dnf install mysql)"
+            $SUDO dnf install -y -q mysql || { echo "ERROR: mysql 클라이언트 설치 실패"; exit 1; }
+          fi
           set -a; . <($SUDO cat /etc/course-change.env); set +a
           host=$(sed -E 's#^jdbc:mysql://([^:/]+).*#\1#' <<<"$DB_URL")
+          port=$(sed -nE 's#^jdbc:mysql://[^:/]+:([0-9]+)/.*#\1#p' <<<"$DB_URL"); port=${port:-3306}
           db=$(sed -E 's#^jdbc:mysql://[^/]+/([^?]+).*#\1#' <<<"$DB_URL")
-          if [ "$db" != course_change ]; then echo "시연 DB가 아님($db) - 초기화 중단"; exit 1; fi
-          MYSQL_PWD="$DB_PASSWORD" mysql -h "$host" -u "$DB_USERNAME" --table course_change < /tmp/seed_demo.sql | tail -n 25
+          if [ "$db" != course_change ]; then echo "ERROR: 시연 DB가 아님($db) - 초기화 중단"; exit 1; fi
+          echo "DB: $host:$port/$db (user $DB_USERNAME)"
+          MYSQL_PWD="$DB_PASSWORD" mysql -h "$host" -P "$port" -u "$DB_USERNAME" --table course_change < /tmp/seed_demo.sql
           rm -f /tmp/seed_demo.sql
           REMOTE
+          rc=$?
+          cat seed.log
+          if [ "$rc" -ne 0 ]; then
+            # 로그를 못 여는 환경에서도 원인이 보이도록 마지막 줄들을 오류 요약(annotation)으로 남긴다
+            msg=$(tail -n 8 seed.log | tr '\n' ' ' | cut -c1-900)
+            echo "::error title=시연 DB 초기화 실패::$msg"
+            exit "$rc"
+          fi
+          # 확인표만 요약에 남김
+          echo "::notice title=시연 DB 초기화 완료::$(grep -E '\((0|1|3|5|10|30)\)' seed.log | tr -s ' |' ' ' | tr '\n' ';' | cut -c1-900)"
 
       # 셀프호스티드 러너에는 키가 남지 않도록 항상 지운다.
       - name: SSH 키 정리
