@@ -54,7 +54,8 @@ ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), blocked_until = N
 -- (그래서 웹프로그래밍 01 = 반짝이는별·배고픈판다 2/35, 고양이가 신청하면 3/35)
 DELETE FROM enrollments WHERE student_id BETWEEN 1 AND 10;
 INSERT INTO enrollments (student_id, offering_id, course_id) VALUES
-    (2, 9, 5), (2, 4, 2), (2, 1, 1), (2, 6, 3),
+    (2, 9, 5),   -- 바쁜다람쥐: 프언01 하나만 보유한다 (운영체제02·자료구조01·컴네02 제거)
+                 --   이 한 건은 지울 수 없다: 교환에 내놓을 좌석이고, 프언01 정원 2/2(마감)를 만드는 데 필요하다
     (3, 2, 1), (3, 14, 8), (3, 16, 9), (3, 17, 10),
     (4, 11, 6), (4, 12, 7), (4, 8, 4), (4, 19, 12), (4, 21, 13),
     (5, 18, 11), (5, 20, 12), (5, 13, 8), (5, 6, 3),
@@ -65,27 +66,15 @@ INSERT INTO enrollments (student_id, offering_id, course_id) VALUES
     (10, 10, 5), (10, 8, 4), (10, 3, 2), (10, 18, 11);
 -- 프로그래밍언어론 01(offering 9, 정원 2) = 다람쥐 + 부엉이 → 마감 상태
 
--- 체험 계정: 쌍마다 A는 01분반, B는 02분반을 1과목만 수강 (교환 조건 항상 통과)
---   1쌍 자료구조(1↔2) · 2쌍 운영체제(3↔4) · 3쌍 컴퓨터네트워크(5↔6)
---   4쌍 데이터베이스(7↔8) · 5쌍 인공지능개론(19↔20)
+-- 체험 계정: 수강내역을 **비워 둔다**. 미리 신청해 두지 않는다.
+--   체험자가 직접 ① 수강희망과목 1순위(자기 분반)를 신청하고 ② 맞교환으로 상대 분반과 바꾼다.
+--   그래서 체험자가 수강신청과 교환을 둘 다 경험한다.
+--   쌍: 1쌍 자료구조(1↔2) · 2쌍 운영체제(3↔4) · 3쌍 컴퓨터네트워크(5↔6)
+--       4쌍 데이터베이스(7↔8) · 5쌍 인공지능개론(19↔20)
 --   ※ 프로그래밍언어론(시연)·대학영어·이산수학(배경 요청)은 일부러 쓰지 않는다.
+--   ⚠ 쌍의 두 사람이 모두 ①을 해야 교환이 성립한다. 안내 슬라이드에 '먼저 수강신청'을 꼭 적을 것.
 DELETE e FROM enrollments e JOIN students s ON s.student_id = e.student_id
 WHERE s.department = '체험';
-
-INSERT INTO enrollments (student_id, offering_id, course_id)
-SELECT s.student_id, t.offering_id, t.course_id
-FROM students s JOIN (
-    SELECT '2026000101' AS no, 1 AS offering_id, 1 AS course_id UNION ALL
-    SELECT '2026000102', 2, 1 UNION ALL
-    SELECT '2026000201', 3, 2 UNION ALL
-    SELECT '2026000202', 4, 2 UNION ALL
-    SELECT '2026000301', 5, 3 UNION ALL
-    SELECT '2026000302', 6, 3 UNION ALL
-    SELECT '2026000401', 7, 4 UNION ALL
-    SELECT '2026000402', 8, 4 UNION ALL
-    SELECT '2026000501', 19, 12 UNION ALL
-    SELECT '2026000502', 20, 12
-) t ON t.no = s.student_no;
 
 -- ---------------------------------------------------------------- 4. 희망과목(찜)
 -- 시나리오: 졸린고양이는 프로그래밍언어론 01을 꼭 듣고 싶었지만 정원 마감으로 못 잡는다.
@@ -128,48 +117,52 @@ INSERT INTO wishlists (student_id, offering_id, preference_rank) VALUES
 
 -- ※ 찜 = 수강신청 '수강희망과목'(희과담). 같은 테이블이라 수강신청에서 담은 과목이 맞교환 찜에 그대로 나온다.
 
--- 바쁜다람쥐: 웹프로그래밍 01이 1순위 → 맞교환 내 페이지에서 '프언01 내놓기 × 웹프01 받기'를 바로 고를 수 있다.
---   웹프01(화목 16:30)은 다람쥐의 남은 수강(운영체제02 화목 13:30, 자료구조01 월수 09:00, 컴네02 월수 15:00)과 겹치지 않는다.
---   2·3순위는 교환 요청을 낸 사람이 없는 분반이라 엇갈린 매칭이 생기지 않는다.
---   ※ 고양이 희과담(9·12·10·1·11·13·16·21)과 한 건도 겹치지 않게 골랐다 (화면 '신청완료' 표시 혼동 방지).
+-- 바쁜다람쥐: 희망과목을 웹프01 **한 건만** 둔다.
+--   시연에서 다람쥐의 역할은 10초다. 받기 후보가 하나뿐이면 잘못 고를 여지가 없다
+--   (이전에 리허설 중 하트를 눌러 순위가 틀어져 다른 과목이 맨 위에 온 적이 있었다).
+--   다람쥐 보유는 프언01 하나뿐이므로 '프언01 내놓기 × 웹프01 받기'가 유일한 조합이 된다.
+--   웹프01(화목 16:30)은 겹칠 과목이 없다. 교환 후 3학점 ≤ 19.
+--   고양이 희과담(9·12·10·1·11·13·16·21)과 겹치지 않는다 (화면 '신청완료' 표시 혼동 방지).
 INSERT INTO wishlists (student_id, offering_id, preference_rank) VALUES
-    (2, 18, 1),   -- 웹프로그래밍 01   ← 교환으로 받을 강의
-    (2, 17, 2),   -- 글쓰기와 소통 01
-    (2, 15, 3);   -- 대학영어 01
+    (2, 18, 1);   -- 웹프로그래밍 01   ← 교환으로 받을 강의
 
--- 체험 계정: 1순위 = 상대 분반 (A는 02, B는 01), 2~5순위 = 희과담 예시 4과목
---   2~5순위로 쓰는 분반(10 프언02, 14 이산수학02, 15 대학영어01, 17 글쓰기01)은
---   ① 체험 계정 누구도 보유하지 않고 ② 고양이도 보유하지 않는다(고양이 보유: 1·11·12·13·16·18·21).
---   ① → 체험 계정끼리 짝이 엇갈려 매칭될 수 없다(매칭은 양방향 일치가 필요하고, 체험 계정이 내놓는 분반은
---        전부 1~8·19·20이라 다른 체험 계정의 희망 목록에는 '자기 짝의 분반'으로만 들어 있다).
---   ② → 고양이가 신청에 성공해도 체험 계정 화면의 '신청완료' 표시가 영향받지 않는다.
---   배경 요청과도 엇갈리지 않는다: 펭귄·토끼는 16을 내놓고 15를 원하며, 부엉이는 14를 내놓고 13을 원하는데
---     체험 계정은 16도 13도 내놓지 않는다.
---   고양이는 웹프01을 내놓지만 프언01만 원하고 체험 계정은 프언01을 갖고 있지 않으므로 고양이와도 엇갈리지 않는다.
+-- 체험 계정 희망과목 3건: 1순위 = 자기 분반(먼저 신청할 것) / 2순위 = 짝의 분반(교환으로 받을 것) / 3순위 = 예시
+--   1순위를 신청하면 그 분반은 찜에서 빠지므로, 맞교환 '받기' 목록 맨 위가 곧 짝의 분반이 된다.
+--   3순위 글쓰기와 소통 01(17)은 ① 체험 계정 누구도 보유하지 않고 ② 고양이도 보유하지 않으며
+--     ③ 아무도 교환에 내놓지 않는다 → 엇갈린 매칭도, '신청완료' 표시 혼동도 생기지 않는다.
+--   체험 계정이 내놓는 분반은 전부 1~8·19·20이고, 다른 체험 계정의 희망 목록에는 '자기 짝의 분반'으로만
+--     들어 있으므로 쌍이 엇갈릴 수 없다.
+--   배경 요청(펭귄·토끼 16→15, 부엉이 14→13)과도 엇갈리지 않는다: 체험 계정은 16도 14도 내놓지 않는다.
+--   고양이는 웹프01을 내놓지만 프언01·프언02만 원하고, 체험 계정은 그 둘을 갖고 있지 않다.
 INSERT INTO wishlists (student_id, offering_id, preference_rank)
-SELECT s.student_id, x.offering_id, x.preference_rank
-FROM students s CROSS JOIN (
-    SELECT 10 AS offering_id, 2 AS preference_rank UNION ALL
-    SELECT 14, 3 UNION ALL
-    SELECT 15, 4 UNION ALL
-    SELECT 17, 5
-) x
-WHERE s.department = '체험';
-
-INSERT INTO wishlists (student_id, offering_id, preference_rank)
-SELECT s.student_id, t.offering_id, 1
+SELECT s.student_id, v.offering_id, v.preference_rank
 FROM students s JOIN (
-    SELECT '2026000101' AS no, 2 AS offering_id UNION ALL
-    SELECT '2026000102', 1 UNION ALL
-    SELECT '2026000201', 4 UNION ALL
-    SELECT '2026000202', 3 UNION ALL
-    SELECT '2026000301', 6 UNION ALL
-    SELECT '2026000302', 5 UNION ALL
-    SELECT '2026000401', 8 UNION ALL
-    SELECT '2026000402', 7 UNION ALL
-    SELECT '2026000501', 20 UNION ALL
-    SELECT '2026000502', 19
-) t ON t.no = s.student_no;
+    -- 학번            1순위=자기 분반   2순위=짝의 분반
+    SELECT '2026000101' AS no,  1 AS offering_id, 1 AS preference_rank UNION ALL
+    SELECT '2026000101',        2,                2 UNION ALL
+    SELECT '2026000102',        2,                1 UNION ALL
+    SELECT '2026000102',        1,                2 UNION ALL
+    SELECT '2026000201',        3,                1 UNION ALL
+    SELECT '2026000201',        4,                2 UNION ALL
+    SELECT '2026000202',        4,                1 UNION ALL
+    SELECT '2026000202',        3,                2 UNION ALL
+    SELECT '2026000301',        5,                1 UNION ALL
+    SELECT '2026000301',        6,                2 UNION ALL
+    SELECT '2026000302',        6,                1 UNION ALL
+    SELECT '2026000302',        5,                2 UNION ALL
+    SELECT '2026000401',        7,                1 UNION ALL
+    SELECT '2026000401',        8,                2 UNION ALL
+    SELECT '2026000402',        8,                1 UNION ALL
+    SELECT '2026000402',        7,                2 UNION ALL
+    SELECT '2026000501',       19,                1 UNION ALL
+    SELECT '2026000501',       20,                2 UNION ALL
+    SELECT '2026000502',       20,                1 UNION ALL
+    SELECT '2026000502',       19,                2
+) v ON v.no = s.student_no;
+
+-- 3순위: 전원 공통 (글쓰기와 소통 01)
+INSERT INTO wishlists (student_id, offering_id, preference_rank)
+SELECT s.student_id, 17, 3 FROM students s WHERE s.department = '체험';
 
 -- ---------------------------------------------------------------- 5. 배경 교환 요청 (시장이 비어 보이지 않게)
 -- 강의 검색 화면의 '희망자 / 보유자' 숫자와 대기열 순위가 이 데이터에서 나온다.
@@ -217,11 +210,12 @@ UNION ALL SELECT '고양이·다람쥐 희과담 겹침 (0)', COUNT(*)
 UNION ALL SELECT '다람쥐가 프언01 보유 (1)', COUNT(*) FROM enrollments WHERE student_id = 2 AND offering_id = 9
 UNION ALL SELECT '졸린고양이 1순위 = 프언01 (1)', COUNT(*) FROM wishlists WHERE student_id = 1 AND offering_id = 9 AND preference_rank = 1
 UNION ALL SELECT '다람쥐 1순위 = 웹프01 (1)', COUNT(*) FROM wishlists WHERE student_id = 2 AND offering_id = 18 AND preference_rank = 1
-UNION ALL SELECT '다람쥐 희망과목 (3)', COUNT(*) FROM wishlists WHERE student_id = 2
-UNION ALL SELECT '체험 계정 희망과목 (50)', COUNT(*) FROM wishlists w JOIN students s ON s.student_id = w.student_id
+UNION ALL SELECT '다람쥐 희망과목 (1)', COUNT(*) FROM wishlists WHERE student_id = 2
+UNION ALL SELECT '다람쥐 수강 (1 = 프언01만)', COUNT(*) FROM enrollments WHERE student_id = 2
+UNION ALL SELECT '체험 계정 희망과목 (30)', COUNT(*) FROM wishlists w JOIN students s ON s.student_id = w.student_id
           WHERE s.department = '체험'
 UNION ALL SELECT '체험 계정 (10)', COUNT(*) FROM students WHERE department = '체험'
-UNION ALL SELECT '체험 계정 수강 (10)', COUNT(*) FROM enrollments e JOIN students s ON s.student_id = e.student_id
+UNION ALL SELECT '체험 계정 수강 (0 = 본인이 직접 신청)', COUNT(*) FROM enrollments e JOIN students s ON s.student_id = e.student_id
           WHERE s.department = '체험'
 UNION ALL SELECT '대기 중 교환 요청 (3)', COUNT(*) FROM exchange_requests WHERE status = 'WAITING'
 UNION ALL SELECT '진행 중 세션 (0)', COUNT(*) FROM match_sessions WHERE status = 'PENDING';
