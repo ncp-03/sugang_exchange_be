@@ -1,9 +1,13 @@
-# 먼저 수동으로 SSH 경로를 검증한다. deploy=true일 때만 API 서버에 배포한다.
+# 기본 브랜치 CI 성공 후 API 서버에 순차 배포한다. 수동 실행은 deploy 입력값으로 제어한다.
 # 경로: GitHub Actions → Vue 서버(Public, SSH 중계) → API 서버(Private)
 # 필요한 GitHub Secrets: BASTION_SSH_PRIVATE_KEY, API_SSH_PRIVATE_KEY, BASTION_HOST, API_HOSTS, SSH_USER
 name: Deploy
 
 on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    branches: ['wip/day22']
   workflow_dispatch:
     inputs:
       deploy:
@@ -24,8 +28,11 @@ jobs:
     name: API 서버 배포 (한 대씩)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: SSH 설정 (Vue 서버를 거쳐 Private 서버로 접속)
         env:
@@ -71,19 +78,19 @@ jobs:
           ssh -o BatchMode=yes -o ConnectTimeout=15 api2 'echo api2 ok'
 
       - uses: actions/setup-java@v5
-        if: ${{ inputs.deploy }}
+        if: ${{ github.event_name == 'workflow_run' || inputs.deploy }}
         with:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
-        if: ${{ inputs.deploy }}
+        if: ${{ github.event_name == 'workflow_run' || inputs.deploy }}
 
       - name: jar 빌드
-        if: ${{ inputs.deploy }}
+        if: ${{ github.event_name == 'workflow_run' || inputs.deploy }}
         run: ./gradlew bootJar -x test --no-daemon
 
       - name: 서버별 롤링 배포
-        if: ${{ inputs.deploy }}
+        if: ${{ github.event_name == 'workflow_run' || inputs.deploy }}
         env:
           API_HOSTS: ${{ secrets.API_HOSTS }}
         run: |
