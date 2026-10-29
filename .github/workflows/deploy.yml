@@ -15,6 +15,16 @@ on:
         type: boolean
         required: true
         default: false
+      allow_loadtest_db:
+        description: '(부하테스트 때만) API 서버가 course_change_loadtest DB에 붙어 있어도 배포 허용'
+        type: boolean
+        required: false
+        default: false
+      reset_demo:
+        description: '배포 후 시연 DB를 시드(tools/db/seed_demo.sql)로 처음 상태로 초기화'
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: deploy
@@ -77,6 +87,29 @@ jobs:
           ssh -o BatchMode=yes -o ConnectTimeout=15 api1 'echo api1 ok'
           ssh -o BatchMode=yes -o ConnectTimeout=15 api2 'echo api2 ok'
 
+      # 배포한 서버는 반드시 시연 DB(course_change)로 떠야 한다.
+      # 부하테스트 때 DB_URL을 course_change_loadtest로 바꿔 두고 되돌리지 않으면 여기서 배포를 멈춘다.
+      - name: DB 연결 확인 (시연 DB = course_change)
+        env:
+          ALLOW_LOADTEST_DB: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_loadtest_db || false }}
+        run: |
+          set -euo pipefail
+          bad=0
+          for h in api1 api2; do
+            db=$(ssh -o BatchMode=yes "$h" 'SUDO=""; [ "$(id -u)" != 0 ] && SUDO="sudo"; $SUDO grep -E "^DB_URL=" /etc/course-change.env | tail -n1' \
+                 | sed -E 's#^DB_URL="?jdbc:mysql://[^/]+/([^?"]+).*#\1#')
+            echo "$h → DB: ${db:-(DB_URL 없음)}"
+            if [ "$db" != "course_change" ]; then bad=1; fi
+          done
+          if [ "$bad" = 1 ]; then
+            if [ "$ALLOW_LOADTEST_DB" = "true" ]; then
+              echo "::warning::시연 DB가 아닌 서버가 있지만 allow_loadtest_db=true 라서 계속합니다 (부하테스트 중)."
+            else
+              echo "::error::API 서버의 /etc/course-change.env DB_URL이 시연 DB(course_change)가 아닙니다. 부하테스트 후 DB_URL을 .../course_change 로 되돌린 뒤 다시 실행하세요. 부하테스트 중 배포라면 수동 실행에서 allow_loadtest_db를 체크하세요."
+              exit 1
+            fi
+          fi
+
       - uses: actions/setup-java@v5
         if: ${{ github.event_name == 'workflow_run' || inputs.deploy }}
         with:
@@ -126,3 +159,20 @@ jobs:
           exit 1
           REMOTE
           done
+
+      # 수동 실행에서 reset_demo를 체크했을 때만. push 자동 배포는 데이터를 건드리지 않는다.
+      - name: 시연 DB 초기화 (seed_demo.sql)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.reset_demo }}
+        run: |
+          set -euo pipefail
+          scp tools/db/seed_demo.sql api1:/tmp/seed_demo.sql
+          ssh api1 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          SUDO=""; [ "$(id -u)" != 0 ] && SUDO="sudo"
+          set -a; . <($SUDO cat /etc/course-change.env); set +a
+          host=$(sed -E 's#^jdbc:mysql://([^:/]+).*#\1#' <<<"$DB_URL")
+          db=$(sed -E 's#^jdbc:mysql://[^/]+/([^?]+).*#\1#' <<<"$DB_URL")
+          if [ "$db" != course_change ]; then echo "시연 DB가 아님($db) - 초기화 중단"; exit 1; fi
+          MYSQL_PWD="$DB_PASSWORD" mysql -h "$host" -u "$DB_USERNAME" --table course_change < /tmp/seed_demo.sql | tail -n 25
+          rm -f /tmp/seed_demo.sql
+          REMOTE

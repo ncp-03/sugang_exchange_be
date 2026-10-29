@@ -77,9 +77,14 @@ jobs:
           set -o pipefail
           java -jar build/libs/app.jar > app.log 2>&1 &
           bash scripts/smoke-test.sh http://localhost:8080 2>&1 | tee smoke.log
+      - name: 시연 시나리오 리허설 (seed_demo.sql → 고양이·다람쥐 교환)
+        run: |
+          set -o pipefail
+          MYSQL="mysql -h127.0.0.1 -P3306 -ucourse_change -pcourse_change course_change" \
+            bash scripts/demo-scenario-test.sh http://localhost:8080 2>&1 | tee demo.log
       - name: 실패 원인 요약
         if: failure()
-        run: python3 scripts/ci-annotate.py gradle-build.log smoke.log app.log
+        run: python3 scripts/ci-annotate.py gradle-build.log smoke.log demo.log app.log
       - name: 서버 로그
         if: always()
         run: cat app.log || true
