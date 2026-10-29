@@ -1,0 +1,121 @@
+# 먼저 수동으로 SSH 경로를 검증한다. deploy=true일 때만 API 서버에 배포한다.
+# 경로: GitHub Actions → Vue 서버(Public, SSH 중계) → API 서버(Private)
+# 필요한 GitHub Secrets: BASTION_SSH_PRIVATE_KEY, API_SSH_PRIVATE_KEY, BASTION_HOST, API_HOSTS, SSH_USER
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'SSH 확인 후 API 서버 두 대에 실제 배포'
+        type: boolean
+        required: true
+        default: false
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: API 서버 배포 (한 대씩)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: SSH 설정 (Vue 서버를 거쳐 Private 서버로 접속)
+        env:
+          BASTION_SSH_PRIVATE_KEY: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          API_SSH_PRIVATE_KEY: ${{ secrets.API_SSH_PRIVATE_KEY }}
+          BASTION_HOST: ${{ secrets.BASTION_HOST }}
+          API_HOSTS: ${{ secrets.API_HOSTS }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          set -euo pipefail
+          for name in BASTION_SSH_PRIVATE_KEY API_SSH_PRIVATE_KEY BASTION_HOST API_HOSTS SSH_USER; do
+            if [ -z "${!name:-}" ]; then echo "Missing GitHub secret: $name" >&2; exit 1; fi
+          done
+          read -r -a hosts <<< "$API_HOSTS"
+          if [ "${#hosts[@]}" -ne 2 ]; then echo 'API_HOSTS must contain exactly two hosts' >&2; exit 1; fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$BASTION_SSH_PRIVATE_KEY" > ~/.ssh/bastion_key
+          printf '%s\n' "$API_SSH_PRIVATE_KEY" > ~/.ssh/api_key
+          chmod 600 ~/.ssh/bastion_key ~/.ssh/api_key
+          {
+            echo "Host bastion"
+            echo "  HostName $BASTION_HOST"
+            echo "  User $SSH_USER"
+            echo "  IdentityFile ~/.ssh/bastion_key"
+            echo "  IdentitiesOnly yes"
+            echo "  StrictHostKeyChecking accept-new"
+            i=0
+            for h in $API_HOSTS; do
+              i=$((i+1))
+              echo "Host api$i"
+              echo "  HostName $h"
+              echo "  User $SSH_USER"
+              echo "  IdentityFile ~/.ssh/api_key"
+              echo "  IdentitiesOnly yes"
+              echo "  ProxyJump bastion"
+              echo "  StrictHostKeyChecking accept-new"
+            done
+          } > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          # 접속 확인 (여기서 막히면 ACG 22번 또는 키 문제)
+          ssh -o BatchMode=yes -o ConnectTimeout=15 bastion 'echo bastion ok'
+          ssh -o BatchMode=yes -o ConnectTimeout=15 api1 'echo api1 ok'
+          ssh -o BatchMode=yes -o ConnectTimeout=15 api2 'echo api2 ok'
+
+      - uses: actions/setup-java@v5
+        if: ${{ inputs.deploy }}
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        if: ${{ inputs.deploy }}
+
+      - name: jar 빌드
+        if: ${{ inputs.deploy }}
+        run: ./gradlew bootJar -x test --no-daemon
+
+      - name: 서버별 롤링 배포
+        if: ${{ inputs.deploy }}
+        env:
+          API_HOSTS: ${{ secrets.API_HOSTS }}
+        run: |
+          set -euo pipefail
+          i=0
+          for h in $API_HOSTS; do
+            i=$((i+1))
+            echo "=== api$i ($h) 배포 ==="
+            scp build/libs/app.jar api$i:/opt/course-change/app.jar.new
+            ssh api$i 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          SUDO=""; [ "$(id -u)" != 0 ] && SUDO="sudo"
+          cd /opt/course-change
+          $SUDO chown root:course app.jar.new
+          $SUDO chmod 640 app.jar.new
+          had_previous=0
+          if [ -f app.jar ]; then cp -p app.jar app.jar.prev; had_previous=1; fi
+          mv app.jar.new app.jar
+          if $SUDO systemctl restart course-change; then
+            # 최대 90초 동안 헬스체크
+            for n in $(seq 1 45); do
+              if curl -fsS http://localhost:8080/actuator/health >/dev/null 2>&1; then
+                echo "health OK"; exit 0
+              fi
+              sleep 2
+            done
+          fi
+          echo "health FAILED → 이전 jar로 롤백"
+          if [ "$had_previous" -eq 1 ]; then
+            cp -p app.jar.prev app.jar
+            $SUDO systemctl restart course-change
+          fi
+          exit 1
+          REMOTE
+          done

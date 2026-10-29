@@ -11,6 +11,7 @@ bin/
 .env
 
 # SSH 키
+.local/
 deploy_key
 deploy_key.pub
 ncp_deploy_key*
