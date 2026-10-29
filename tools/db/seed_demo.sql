@@ -3,6 +3,8 @@
 --
 -- 시연: 졸린고양이(2024000001, 발표자 PC) ↔ 바쁜다람쥐(2024000002, 팀원 PC)가
 --       실제로 서로 강의를 맞교환한다 (고양이 웹프01 ↔ 다람쥐 프언01). 두 사람 모두 화면에서 직접 요청·확정한다.
+--       고양이는 시연 중 7과목을 신청해 19/19학점(상한)을 꽉 채운다. 그래서 '일반 신청으로는 더 못 늘리지만
+--       교환은 학점 합계가 그대로라 통과한다'를 보여줄 수 있다. 소프트웨어공학 01은 교환에 올리지 않고 그대로 유지한다.
 -- 체험: 시연 당일 방문자가 직접 해 볼 수 있도록 체험 계정 5쌍(10개)을 만든다.
 --       쌍마다 서로 다른 과목을 써서 다른 쌍·시연 계정과 절대 엇갈려 매칭되지 않는다.
 --
@@ -91,12 +93,24 @@ FROM students s JOIN (
 --          대신 웹프로그래밍 01을 잡고, 맞교환에서 '웹프01 내놓기 × 프언01 받기'로 다람쥐와 교환한다.
 -- 수강신청 화면 '수강희망과목' 탭에는 순위 없이 이 순서대로 나온다.
 INSERT INTO wishlists (student_id, offering_id, preference_rank) VALUES
-    (1,  9, 1),   -- 프로그래밍언어론 01 (화목 15:00, 정원 2/2 마감 → 신청 실패. 교환으로 받을 강의)
-    (1, 18, 2),   -- 웹프로그래밍 01   (화목 16:30, 신청 성공 → 교환으로 내놓을 강의)
-    (1, 12, 3),   -- 소프트웨어공학 01 (월수 13:30)
-    (1,  3, 4),   -- 운영체제 01       (월수 10:30)
-    (1,  7, 5);   -- 데이터베이스 01   (월수 12:00)
--- 위 5과목은 서로, 그리고 프언01과도 시간이 겹치지 않는다 (전부 신청해도 15학점 + 교환 후 15학점).
+    (1,  9, 1),   -- 프로그래밍언어론 01 (화목 15:00, 3학점) 정원 2/2 마감 → 신청 실패. 교환으로 받을 강의
+    (1, 12, 2),   -- 소프트웨어공학 01   (월수 13:30, 3학점) ★교환에 올리지 않고 끝까지 유지하는 강의
+    (1, 18, 3),   -- 웹프로그래밍 01     (화목 16:30, 3학점) 신청 성공 → 교환으로 내놓을 강의
+    (1,  1, 4),   -- 자료구조 01         (월수 09:00, 3학점)
+    (1, 11, 5),   -- 컴파일러 01         (월수 12:00, 3학점)
+    (1, 13, 6),   -- 이산수학 01         (화목 09:00, 3학점)
+    (1, 16, 7),   -- 대학영어 02         (월수 10:30, 3학점)
+    (1, 21, 8);   -- 체육과 건강 01      (금 13:30, 1학점) ← 1학점이라 19학점을 정확히 맞출 수 있다
+-- 프언01을 뺀 7과목 = 3학점×6 + 1학점 = 19학점 = 고양이 max_credits(19).
+--   → 전부 신청하면 19/19로 꽉 차서, 이후 어떤 과목을 더 신청해도 '학점 상한 초과'가 난다.
+--   → 교환은 웹프01(3) 빠지고 프언01(3) 들어와 19/19 그대로이므로 재검사를 통과한다
+--     (ExchangeValidator: after > max_credits 일 때만 막으므로 19 > 19 는 false).
+-- 7과목은 서로, 그리고 프언01(화목 15:00)과도 수업 시간이 겹치지 않는다.
+-- 신청 순서: 소공01(월수 13:30)을 먼저 신청해 두면 프언02(월수 13:30) 신청 시 '시간표 겹침'을 보여줄 수 있다.
+--   프언02는 일부러 희과담에 넣지 않았다(개설강좌 목록 탭에서 찾아 신청). 학점이 꽉 찬 뒤에는
+--   정원·같은과목 검사를 통과하는 과목(예: 컴퓨터네트워크 01)을 신청하면 '학점 상한 초과'가 난다.
+-- ※ 맞교환 '찜' 목록에는 이미 수강 중인 과목이 빠지므로, 7과목을 다 신청하면 찜에 프언01만 남는다
+--   → 내 페이지에서 '받기'는 프언01 하나로 자동 좁혀지고, '내놓기'만 7개 중에서 고르면 된다.
 
 -- ※ 찜 = 수강신청 '수강희망과목'(희과담). 같은 테이블이라 수강신청에서 담은 과목이 맞교환 찜에 그대로 나온다.
 
@@ -108,12 +122,20 @@ INSERT INTO wishlists (student_id, offering_id, preference_rank) VALUES
     (2, 17, 2),   -- 글쓰기와 소통 01
     (2, 11, 3);   -- 컴파일러 01
 
--- 체험 계정: 1순위 = 상대 분반 (A는 02, B는 01), 2·3순위 = 희과담 예시 (웹프로그래밍 01, 글쓰기와 소통 01)
---   2·3순위는 매칭되지 않는다. 시연 중 고양이가 웹프01을 내놓지만 고양이는 프언01만 원하므로
---   체험 계정(프언01 미보유)과는 서로 일치하지 않는다.
+-- 체험 계정: 1순위 = 상대 분반 (A는 02, B는 01), 2~5순위 = 희과담 예시 4과목
+--   2~5순위로 쓰는 분반(18 웹프01, 17 글쓰기01, 11 컴파일러01, 12 소공01)은 체험 계정 누구도 보유하지 않는다.
+--   → 체험 계정끼리 짝이 엇갈려 매칭될 수 없다(매칭은 양방향 일치가 필요하고, 체험 계정이 내놓는 분반은
+--     전부 1~8·19·20이라 다른 체험 계정의 희망 목록에는 '자기 짝의 분반'으로만 들어 있다).
+--   고양이는 웹프01을 내놓지만 프언01만 원하고 체험 계정은 프언01을 갖고 있지 않으므로 고양이와도 엇갈리지 않는다.
+--   고양이가 11·12·18을 보유하게 되지만 고양이가 내놓는 것은 웹프01뿐이라 영향 없다.
 INSERT INTO wishlists (student_id, offering_id, preference_rank)
 SELECT s.student_id, x.offering_id, x.preference_rank
-FROM students s CROSS JOIN (SELECT 18 AS offering_id, 2 AS preference_rank UNION ALL SELECT 17, 3) x
+FROM students s CROSS JOIN (
+    SELECT 18 AS offering_id, 2 AS preference_rank UNION ALL
+    SELECT 17, 3 UNION ALL
+    SELECT 11, 4 UNION ALL
+    SELECT 12, 5
+) x
 WHERE s.department = '체험';
 
 INSERT INTO wishlists (student_id, offering_id, preference_rank)
@@ -165,12 +187,16 @@ WHERE r.student_id = 8 AND e.offering_id = 14;
 -- ---------------------------------------------------------------- 6. 확인
 SELECT '졸린고양이 수강내역 (0)' AS check_name, COUNT(*) AS value
 FROM enrollments WHERE student_id = 1
-UNION ALL SELECT '졸린고양이 희망과목 (5)', COUNT(*) FROM wishlists WHERE student_id = 1
+UNION ALL SELECT '졸린고양이 희망과목 (8)', COUNT(*) FROM wishlists WHERE student_id = 1
+UNION ALL SELECT '졸린고양이 최대학점 (19)', max_credits FROM students WHERE student_id = 1
+UNION ALL SELECT '고양이가 신청할 7과목 학점합 (19)',
+          COALESCE(SUM(o.credits), 0) FROM wishlists w JOIN course_offerings o ON o.offering_id = w.offering_id
+          WHERE w.student_id = 1 AND w.offering_id <> 9
 UNION ALL SELECT '다람쥐가 프언01 보유 (1)', COUNT(*) FROM enrollments WHERE student_id = 2 AND offering_id = 9
 UNION ALL SELECT '졸린고양이 1순위 = 프언01 (1)', COUNT(*) FROM wishlists WHERE student_id = 1 AND offering_id = 9 AND preference_rank = 1
 UNION ALL SELECT '다람쥐 1순위 = 웹프01 (1)', COUNT(*) FROM wishlists WHERE student_id = 2 AND offering_id = 18 AND preference_rank = 1
 UNION ALL SELECT '다람쥐 희망과목 (3)', COUNT(*) FROM wishlists WHERE student_id = 2
-UNION ALL SELECT '체험 계정 희망과목 (30)', COUNT(*) FROM wishlists w JOIN students s ON s.student_id = w.student_id
+UNION ALL SELECT '체험 계정 희망과목 (50)', COUNT(*) FROM wishlists w JOIN students s ON s.student_id = w.student_id
           WHERE s.department = '체험'
 UNION ALL SELECT '체험 계정 (10)', COUNT(*) FROM students WHERE department = '체험'
 UNION ALL SELECT '체험 계정 수강 (10)', COUNT(*) FROM enrollments e JOIN students s ON s.student_id = e.student_id
