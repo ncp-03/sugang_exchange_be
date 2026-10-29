@@ -36,7 +36,10 @@ app:
     # 10월 27일 부하테스트: 1차는 NONE, 2차는 PESSIMISTIC으로 실행해 비교한다.
     #   java -jar app.jar --app.matching.lock-mode=PESSIMISTIC
     # 또는 환경변수 APP_MATCHING_LOCK_MODE=PESSIMISTIC
-    lock-mode: ${APP_MATCHING_LOCK_MODE:NONE}
+    # 기본값은 PESSIMISTIC(락 있음) = 실제 서비스 상태.
+    # 락 없음은 부하테스트 비교용이므로 APP_MATCHING_LOCK_MODE=NONE 으로 명시해서 켠다.
+    # (기본값이 NONE이던 동안 서버 env에 값이 빠져 락 없이 운영된 사고가 있었다 — 2026-10-29)
+    lock-mode: ${APP_MATCHING_LOCK_MODE:PESSIMISTIC}
     # 매칭 후 양쪽이 동의해야 하는 제한 시간(초)
     accept-timeout-seconds: ${APP_MATCHING_ACCEPT_TIMEOUT:120}
     # 매칭 실패 후 같은 두 학생이 다시 매칭될 수 없는 시간(초)

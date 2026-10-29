@@ -32,7 +32,8 @@ public class MatchingProperties {
     }
 
     /** 락 전략. 기본값은 NONE (1차 테스트가 먼저이므로). */
-    private LockMode lockMode = LockMode.NONE;
+    /** 기본은 락 있음. 락 없음(NONE)은 부하테스트 비교용으로만 명시해서 켠다. */
+    private LockMode lockMode = LockMode.PESSIMISTIC;
 
     /** 매칭 후 양쪽이 동의해야 하는 제한 시간(초). */
     private int acceptTimeoutSeconds = 120;

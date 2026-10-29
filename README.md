@@ -57,7 +57,7 @@ bash scripts/smoke-test.sh              # 서버를 띄운 뒤 주요 API를 cur
 | `PORT` | `8080` | 서버 포트 |
 | `APP_AUTH_MODE` | `TOKEN` | `TOKEN`: 로그인 토큰만 인정. `DEMO`: `X-Student-Id` 헤더도 인정 (로컬·부하테스트 전용, **공개 서버 금지**) |
 | `APP_AUTH_SECRET` | 비어 있음 | 토큰 서명 키. 비우면 기동마다 무작위 생성(재시작 시 토큰 무효). 운영은 고정 권장 |
-| `APP_MATCHING_LOCK_MODE` | `NONE` | 교환 락 전략. `NONE`(락 없음) / `PESSIMISTIC`(비관적 락). 부하테스트 비교용 |
+| `APP_MATCHING_LOCK_MODE` | `PESSIMISTIC` | 교환 락 전략. 기본은 `PESSIMISTIC`(비관적 락) = 실제 서비스 상태. `NONE`(락 없음)은 부하테스트 비교용으로만 명시해서 켠다 |
 | `APP_MATCHING_ACCEPT_TIMEOUT` | `120` | 매칭 후 양쪽이 동의해야 하는 제한 시간(초) |
 | `APP_MATCHING_EXPIRE_SCHEDULER` | `true` | 만료 세션 자동 처리 스케줄러 (5초마다) |
 
