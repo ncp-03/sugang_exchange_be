@@ -4,6 +4,7 @@
 #   2) 발표 시나리오를 API로 그대로 재현한다:
 #      고양이 프언01 신청 → 마감(409) → 소공01 신청 → 프언02 신청 → 시간표 겹침(409)
 #      → 웹프01 등 나머지 6과목 신청 → 19/19학점(상한) → 추가 신청 시 학점 상한 초과(409)
+#      → 교환 가능 여부 표에 불가 사유('학점 상한 초과'·'시간표 겹침')가 함께 나오는지 확인
 #      → 고양이 '웹프01 내놓기 × 프언01 받기' 대기 → 다람쥐 '프언01 내놓기 × 웹프01 받기' 즉시 매칭
 #      → 양쪽 확정 → 고양이 프언01(소공01 등 6과목 유지, 19/19 그대로) / 다람쥐 웹프01
 #   3) 끝나면 시드를 다시 실행해 처음 상태로 돌려 둔다.
@@ -42,7 +43,7 @@ r=$(call "$CAT" GET /api/enrollments/me)
 [ "$(body "$r" | jq '.enrollments | length')" = 0 ] && ok "고양이 수강 0건으로 시작" || fail "고양이 수강 0건 아님: $(body "$r" | head -c 300)"
 
 r=$(call "$CAT" GET /api/wishlists/me)
-[ "$(body "$r" | jq '[.wishlists[] | .course.offeringId]' -c)" = '[9,12,18,1,11,13,16,21]' ] \
+[ "$(body "$r" | jq '[.wishlists[] | .course.offeringId]' -c)" = '[9,12,10,1,11,13,16,21]' ] \
   && ok "고양이 희과담 8과목 (프언01이 맨 위)" || fail "고양이 희과담: $(body "$r" | head -c 300)"
 
 r=$(call "$CAT" POST /api/enrollments '{"offeringId":9}')
@@ -79,6 +80,16 @@ r=$(call "$CAT" POST /api/enrollments '{"offeringId":5}')
 [ "$(code "$r")" = 409 ] && [ "$(body "$r" | jq -r .code)" = CREDIT_LIMIT_EXCEEDED ] \
   && ok "꽉 찬 상태에서 추가 신청 → 학점 상한 초과 (409 CREDIT_LIMIT_EXCEEDED)" \
   || fail "학점 상한 초과가 아님: $r"
+
+# 교환 가능 여부 표에 '가능'만 나오지 않고 불가 사유도 나오는지 (시연에서 보여 줄 부분)
+r=$(call "$CAT" GET /api/exchange-requests/eligibility)
+[ "$(code "$r")" = 200 ] || fail "교환 가능 여부 조회: $r"
+body "$r" | grep -q "학점 상한 초과" \
+  && ok "가능 여부 표에 '학점 상한 초과' 불가 사유 있음 (체육01 1학점 x 프언01 3학점)" \
+  || fail "'학점 상한 초과' 불가 사유가 없음: $(body "$r" | head -c 500)"
+body "$r" | grep -q "시간표 겹침" \
+  && ok "가능 여부 표에 '시간표 겹침' 불가 사유 있음 (소공01이 남은 채로 프언02 받기)" \
+  || fail "'시간표 겹침' 불가 사유가 없음: $(body "$r" | head -c 500)"
 
 r=$(call "$CAT" POST /api/exchange-requests "{\"offeredEnrollmentId\":$WEB,\"wantedOfferingIds\":[9],\"autoMatch\":true}")
 [ "$(code "$r")" = 201 ] || [ "$(code "$r")" = 200 ] || fail "고양이 교환 요청: $r"
