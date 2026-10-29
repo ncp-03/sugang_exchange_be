@@ -23,7 +23,7 @@ class FixtureRegressionTest(unittest.TestCase):
                 self.assertEqual(entry['sha256'],hashlib.sha256(raw).hexdigest())
 
     def test_v2_and_v3_histories_are_supported(self):
-        for versions in (['1','2'],['1','2','3']):
+        for versions in (['1','2'],['1','2','3'],['1','2','3','4']):
             with self.subTest(versions=versions):
                 cursor=Mock()
                 cursor.fetchall.return_value=[{'version':v,'success':1} for v in versions]
@@ -32,7 +32,7 @@ class FixtureRegressionTest(unittest.TestCase):
     def test_missing_failed_and_future_migrations_are_rejected(self):
         for history in ([],[{'version':'1','success':1}],
                         [{'version':'1','success':1},{'version':'2','success':0}],
-                        [{'version':v,'success':1} for v in ['1','2','3','4']]):
+                        [{'version':v,'success':1} for v in ['1','2','3','4','5']]):
             with self.subTest(history=history):
                 cursor=Mock();cursor.fetchall.return_value=history
                 with self.assertRaises(RuntimeError):fixtures.migration_history(cursor)

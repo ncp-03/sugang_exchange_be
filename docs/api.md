@@ -90,7 +90,7 @@
 | `GET /api/match-sessions/me/history` | **교환 기록**. `{ count, items: [{ sessionId, completedAt, partnerNickname, giveCourse, receiveCourse }] }` |
 | `GET /api/match-sessions/{id}` | 상세 |
 | `POST /api/match-sessions/{id}/accept` | 동의. 둘 다 동의하면 즉시 교환 실행 → `status: COMPLETED` |
-| `POST /api/match-sessions/{id}/reject` | 거절 (감점 2점) |
+| `POST /api/match-sessions/{id}/reject` | 거절·매칭 취소 (감점 2점). 내가 이미 확정했어도 상대가 확정하기 전이면 취소 가능 |
 | `POST /api/match-sessions/{id}/wake` | 상대 깨우기 (최대 3회) |
 
 `Session`: `{ sessionId, status(PENDING|COMPLETED|REJECTED|EXPIRED|INVALIDATED), openedAt, expiresAt, remainingSeconds, firstAcceptedAt, participants:[{ me, nickname, responseStatus, giveCourse, receiveCourse, wakeSentCount }] }`

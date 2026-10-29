@@ -96,8 +96,14 @@ public class MatchParticipant {
         this.respondedAt = now;
     }
 
+    /**
+     * 거절·취소. 아직 응답하지 않았거나 <b>이미 동의(확정)한 상태에서도</b> 세션이 끝나기 전이면 취소할 수 있다.
+     * 이미 거절한 경우만 막는다.
+     */
     public void reject(LocalDateTime now) {
-        requirePending();
+        if (responseStatus == ResponseStatus.REJECTED) {
+            throw new IllegalStateException("이미 거절했습니다.");
+        }
         this.responseStatus = ResponseStatus.REJECTED;
         this.respondedAt = now;
     }

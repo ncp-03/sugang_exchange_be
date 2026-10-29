@@ -205,6 +205,56 @@ class QuickMatchAndSwapTest extends ResettableIntegrationTest {
     }
 
     @Test
+    @DisplayName("내가 먼저 확정했어도 상대가 확정하기 전이면 매칭을 취소할 수 있고, 다시 매칭할 수 있다")
+    void cancelAfterAcceptThenRematch() throws Exception {
+        long requestA = register(1, 10, "9", false);
+        long requestB = register(2, 9, "10", false);
+
+        MvcResult matched = mvc.perform(post("/api/exchange-requests/" + requestB + "/quick-match")
+                        .header(STUDENT, "2"))
+                .andExpect(status().isOk()).andReturn();
+        long sessionId = om.readTree(matched.getResponse().getContentAsString())
+                .path("session").path("sessionId").asLong();
+
+        // 학생 1 확정 → 아직 PENDING
+        mvc.perform(post("/api/match-sessions/" + sessionId + "/accept").header(STUDENT, "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+
+        // 확정한 학생 1이 취소 → REJECTED
+        mvc.perform(post("/api/match-sessions/" + sessionId + "/reject").header(STUDENT, "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"));
+
+        // 두 번 취소는 409
+        mvc.perform(post("/api/match-sessions/" + sessionId + "/reject").header(STUDENT, "1"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("SESSION_NOT_PENDING"));
+
+        // 좌석은 그대로, 두 요청은 WAITING
+        mvc.perform(get("/api/enrollments/me").header(STUDENT, "1"))
+                .andExpect(jsonPath("$.enrollments[*].course.offeringId",
+                        org.hamcrest.Matchers.hasItem(10)));
+        mvc.perform(get("/api/exchange-requests/" + requestA).header(STUDENT, "1"))
+                .andExpect(jsonPath("$.status").value("WAITING"));
+        mvc.perform(get("/api/exchange-requests/" + requestB).header(STUDENT, "2"))
+                .andExpect(jsonPath("$.status").value("WAITING"));
+
+        // 다시 매칭 → 양쪽 확정 → 교환 완료
+        MvcResult again = mvc.perform(post("/api/exchange-requests/" + requestA + "/quick-match")
+                        .header(STUDENT, "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.matched").value(true)).andReturn();
+        long session2 = om.readTree(again.getResponse().getContentAsString())
+                .path("session").path("sessionId").asLong();
+        mvc.perform(post("/api/match-sessions/" + session2 + "/accept").header(STUDENT, "1"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/match-sessions/" + session2 + "/accept").header(STUDENT, "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
+    }
+
+    @Test
     @DisplayName("깨우기는 3회까지, 4번째는 409 WAKE_LIMIT_EXCEEDED")
     void wakeLimit() throws Exception {
         register(1, 10, "9", false);

@@ -15,3 +15,7 @@ deploy_key
 deploy_key.pub
 ncp_deploy_key*
 *.pem
+
+# 패치·묶음 파일
+*.patch
+*.tar.gz
