@@ -18,15 +18,9 @@
 -- 이 DB가 시연 DB인지 확인 (loadtest DB는 학생이 1만 명 이상)
 SELECT DATABASE() AS current_db, COUNT(*) AS students FROM students;
 
--- 안전장치: 시연 DB(course_change)가 아니면 CHECK 위반 오류(3819)로 여기서 멈춘다.
--- (mysql 클라이언트는 파일 실행 중 오류가 나면 이후 문장을 실행하지 않는다)
-DROP TEMPORARY TABLE IF EXISTS seed_demo_guard;
-CREATE TEMPORARY TABLE seed_demo_guard (
-    db_name VARCHAR(64),
-    CONSTRAINT ck_seed_demo_only_course_change CHECK (db_name = 'course_change')
-);
-INSERT INTO seed_demo_guard VALUES (DATABASE());
-DROP TEMPORARY TABLE seed_demo_guard;
+-- 안전장치: 시연 DB(course_change)가 아니면 'Invalid JSON text' 오류(3141)로 여기서 멈춘다.
+-- 추가 권한(임시 테이블 등)이 필요 없는 방식. mysql 클라이언트는 오류가 나면 이후 문장을 실행하지 않는다.
+SELECT JSON_EXTRACT(IF(DATABASE() = 'course_change', '"OK: 시연 DB"', 'STOP: 시연 DB가 아님'), '$') AS db_guard;
 
 -- ---------------------------------------------------------------- 1. 교환 데이터 초기화
 -- 외래 키 때문에 자식 테이블부터 지운다. 강의 데이터는 건드리지 않는다.
