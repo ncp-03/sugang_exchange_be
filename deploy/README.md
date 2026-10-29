@@ -62,7 +62,7 @@ ssh-keygen -t ed25519 -f api_deploy_key -N "" -C "github-actions-api"
 | `API_HOSTS` | 두 API 서버 사설 IP를 공백으로 구분 (`10.0.5.6 10.0.5.7`) |
 | `SSH_USER` | 세 서버에서 접속을 확인한 `root` |
 
-위 5개 비밀값은 `ncp-03/sugang_exchange_be` 저장소에 등록했습니다. 현재 기본 브랜치는 `wip/day22`입니다. `.github/workflows/deploy.yml`의 수동 실행 `deploy=false`에서 Vue 경유 두 API SSH 접속을 확인했습니다. `wip/day22`의 CI 성공 뒤에는 두 API 서버에 순차 자동 배포됩니다. 수동 실행은 Actions → Deploy → Run workflow에서 `deploy=true`를 선택하면 배포하고, 기본값 `false`에서는 SSH만 점검합니다.
+위 5개 비밀값은 `ncp-03/sugang_exchange_be` 저장소에 등록했습니다. 현재 기본 브랜치는 `main`입니다 (10/29 `wip/day22`에서 이름 변경). `.github/workflows/deploy.yml`의 수동 실행 `deploy=false`에서 Vue 경유 두 API SSH 접속을 확인했습니다. `main`의 CI 성공 뒤에는 두 API 서버에 순차 자동 배포됩니다. 수동 실행은 Actions → Deploy → Run workflow에서 `deploy=true`를 선택하면 배포하고, 기본값 `false`에서는 SSH만 점검합니다.
 
 ## 5. 문제 확인
 - `bastion ok`가 안 찍힘 → Vue 서버 22번 ACG 또는 키 불일치

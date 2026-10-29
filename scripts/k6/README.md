@@ -1,6 +1,6 @@
 # k6 부하 테스트 시나리오
 
-이 스크립트는 현재 `wip/day22` 백엔드 API를 대상으로 합니다. 기본 인증은 `TOKEN`이며, 학생별로 `POST /api/auth/login`을 호출해 Bearer 토큰을 사용합니다. `APP_AUTH_MODE=DEMO`로 실행한 비공개 서버에서만 `-e AUTH_MODE=DEMO`를 사용하세요.
+이 스크립트는 현재 `main` 백엔드 API를 대상으로 합니다. 기본 인증은 `TOKEN`이며, 학생별로 `POST /api/auth/login`을 호출해 Bearer 토큰을 사용합니다. `APP_AUTH_MODE=DEMO`로 실행한 비공개 서버에서만 `-e AUTH_MODE=DEMO`를 사용하세요.
 
 ## 실행
 
@@ -14,7 +14,7 @@ k6 run -e PROFILE=lt18 -e BASE_URL=http://127.0.0.1:8080 scripts/k6/scenarios.js
 서버에 파일 하나만 내려받은 경우:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/ncp-03/sugang_exchange_be/wip/day22/scripts/k6/scenarios.js -o ~/scenarios.js
+curl -fL https://raw.githubusercontent.com/ncp-03/sugang_exchange_be/main/scripts/k6/scenarios.js -o ~/scenarios.js
 k6 run -e PROFILE=lt18 -e BASE_URL=http://127.0.0.1:8080 ~/scenarios.js
 ```
 

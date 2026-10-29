@@ -316,7 +316,7 @@ export function setup() {
   }
 }
 
-// One deterministic pass through the APIs implemented in wip/day22.
+// One deterministic pass through the APIs implemented in main.
 export function apiSmoke() {
   group('course discovery', () => {
     checkCourseListSearch();
