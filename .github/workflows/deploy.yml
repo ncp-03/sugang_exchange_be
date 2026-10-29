@@ -6,7 +6,16 @@
 #   - 없음/그 외: [기존] GitHub 호스팅 러너 → Vue 서버(SSH 중계, 22번 공개 필요) → API 서버.
 # jar 빌드는 두 경우 모두 GitHub 호스팅 러너에서 한다 (Vue 서버에 Java·Gradle 부담을 주지 않음).
 #
+# 배포 대상(오토스케일링 대응, 10/29):
+#   - NCP_ACCESS_KEY·NCP_SECRET_KEY(Secrets) + NCP_TARGET_GROUP_NO(Variables)가 있으면
+#     LB Target Group에 지금 붙어 있는 서버 전부(ASG로 늘어난 서버 포함)에 배포한다.
+#     API_HOSTS에 있는 서버를 먼저(=api1은 항상 만료 스케줄러가 켜진 course-api-01), 나머지는 IP 순.
+#   - 없거나 조회 실패면 API_HOSTS 고정 목록으로 배포한다(경고).
+#   - 새 jar는 Vue 서버 사설 포트(8008)에도 올린다. ASG가 나중에 띄우는 서버는 부팅 때 여기서 최신 jar를 받는다
+#     (deploy/fetch-latest-jar.sh, deploy/setup-vue-artifacts.sh).
+#
 # 필요한 Secrets: API_SSH_PRIVATE_KEY, API_HOSTS, SSH_USER (+ 기존 경로일 때 BASTION_SSH_PRIVATE_KEY, BASTION_HOST)
+#                 (+ 오토스케일링 대응: NCP_ACCESS_KEY, NCP_SECRET_KEY / Variables: NCP_TARGET_GROUP_NO)
 # 러너 설치 방법: deploy/runner/README.md
 name: Deploy
 
@@ -18,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy:
-        description: 'SSH·DB 확인 후 API 서버 두 대에 실제 배포 (끄면 확인만)'
+        description: 'SSH·DB 확인 후 API 서버 전부(ASG 포함)에 실제 배포 (끄면 확인만)'
         type: boolean
         required: true
         default: false
@@ -87,23 +96,58 @@ jobs:
           name: app-jar
           path: build/libs
 
+      # 배포 대상 서버 목록. Target Group 조회 → API_HOSTS 순서 우선 정렬. 실패하면 API_HOSTS.
+      - name: 배포 대상 조회 (LB Target Group)
+        env:
+          API_HOSTS: ${{ secrets.API_HOSTS }}
+          NCP_ACCESS_KEY: ${{ secrets.NCP_ACCESS_KEY }}
+          NCP_SECRET_KEY: ${{ secrets.NCP_SECRET_KEY }}
+          NCP_TARGET_GROUP_NO: ${{ vars.NCP_TARGET_GROUP_NO }}
+        run: |
+          set -euo pipefail
+          read -r -a fixed <<< "${API_HOSTS:-}"
+          tg=""
+          if [ -n "${NCP_ACCESS_KEY:-}" ] && [ -n "${NCP_SECRET_KEY:-}" ] && [ -n "${NCP_TARGET_GROUP_NO:-}" ]; then
+            if tg=$(bash deploy/ncp-target-ips.sh); then
+              echo "Target Group $NCP_TARGET_GROUP_NO 서버: $(echo $tg)"
+            else
+              tg=""
+              echo "::warning title=배포 대상::Target Group 조회 실패 → API_HOSTS(${fixed[*]:-없음})에만 배포합니다. ASG 서버는 다음 재시작 때 최신 jar를 받습니다."
+            fi
+          else
+            echo "::warning title=배포 대상::NCP_ACCESS_KEY/NCP_SECRET_KEY/NCP_TARGET_GROUP_NO 미설정 → API_HOSTS에만 배포합니다."
+          fi
+          hosts=()
+          if [ -n "$tg" ]; then
+            for h in "${fixed[@]}"; do
+              if grep -qxF "$h" <<<"$tg"; then hosts+=("$h"); else echo "::warning::$h 는 API_HOSTS에 있지만 Target Group에 없어 건너뜀"; fi
+            done
+            while read -r h; do
+              [ -n "$h" ] || continue
+              printf '%s\n' "${hosts[@]}" | grep -qxF "$h" || hosts+=("$h")
+            done <<<"$tg"
+          else
+            hosts=("${fixed[@]}")
+          fi
+          if [ "${#hosts[@]}" -eq 0 ]; then echo "::error::배포 대상 서버가 없습니다 (API_HOSTS·Target Group 확인)"; exit 1; fi
+          echo "TARGET_HOSTS=${hosts[*]}" >> "$GITHUB_ENV"
+          echo "::notice title=배포 대상 ${#hosts[@]}대::${hosts[*]}"
+
       # SSH 설정은 러너의 ~/.ssh 를 건드리지 않도록 작업용 임시 폴더에 만들고 끝나면 지운다.
+      # 서버 별칭: api1, api2, ... (TARGET_HOSTS 순서). api1 = 시드 초기화를 실행하는 서버.
       - name: SSH 설정
         env:
           BASTION_SSH_PRIVATE_KEY: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           API_SSH_PRIVATE_KEY: ${{ secrets.API_SSH_PRIVATE_KEY }}
           BASTION_HOST: ${{ secrets.BASTION_HOST }}
-          API_HOSTS: ${{ secrets.API_HOSTS }}
           SSH_USER: ${{ secrets.SSH_USER }}
         run: |
           set -euo pipefail
-          need="API_SSH_PRIVATE_KEY API_HOSTS SSH_USER"
+          need="API_SSH_PRIVATE_KEY SSH_USER"
           [ "$VIA_RUNNER" = true ] || need="$need BASTION_SSH_PRIVATE_KEY BASTION_HOST"
           for name in $need; do
             if [ -z "${!name:-}" ]; then echo "Missing GitHub secret: $name" >&2; exit 1; fi
           done
-          read -r -a hosts <<< "$API_HOSTS"
-          if [ "${#hosts[@]}" -ne 2 ]; then echo 'API_HOSTS must contain exactly two hosts' >&2; exit 1; fi
 
           D="$RUNNER_TEMP/deploy-ssh"
           rm -rf "$D"; mkdir -p "$D"; chmod 700 "$D"
@@ -123,7 +167,7 @@ jobs:
               echo "  IdentityFile $D/bastion_key"
             fi
             i=0
-            for h in $API_HOSTS; do
+            for h in $TARGET_HOSTS; do
               i=$((i+1))
               echo "Host api$i"
               echo "  HostName $h"
@@ -135,11 +179,15 @@ jobs:
           } > "$D/config"
           chmod 600 "$D/config"
           echo "SSHCFG=$D/config" >> "$GITHUB_ENV"
+          echo "API_ALIASES=$(seq -s ' ' -f 'api%g' 1 $(wc -w <<<"$TARGET_HOSTS"))" >> "$GITHUB_ENV"
           echo "배포 경로: $([ "$VIA_RUNNER" = true ] && echo '셀프호스티드 러너(Vue 서버) → API 사설 IP' || echo 'GitHub 러너 → Vue(SSH 중계) → API')"
           # 접속 확인 (여기서 막히면 ACG 22번 또는 키 문제)
           [ "$VIA_RUNNER" = true ] || ssh -F "$D/config" bastion 'echo bastion ok'
-          ssh -F "$D/config" api1 'echo api1 ok'
-          ssh -F "$D/config" api2 'echo api2 ok'
+          i=0
+          for h in $TARGET_HOSTS; do
+            i=$((i+1))
+            ssh -F "$D/config" "api$i" "echo \"api$i ($h) ok: \$(hostname)\""
+          done
 
       # 배포한 서버는 반드시 시연 DB(course_change)로 떠야 한다.
       # 부하테스트 때 DB_URL을 course_change_loadtest로 바꿔 두고 되돌리지 않으면 여기서 배포를 멈춘다.
@@ -149,7 +197,7 @@ jobs:
         run: |
           set -euo pipefail
           bad=0
-          for h in api1 api2; do
+          for h in $API_ALIASES; do
             db=$(ssh -F "$SSHCFG" "$h" 'SUDO=""; [ "$(id -u)" != 0 ] && SUDO="sudo"; $SUDO grep -E "^DB_URL=" /etc/course-change.env | tail -n1' \
                  | sed -E 's#^DB_URL="?jdbc:mysql://[^/]+/([^?"]+).*#\1#')
             echo "$h → DB: ${db:-(DB_URL 없음)}"
@@ -164,45 +212,106 @@ jobs:
             fi
           fi
 
-      - name: 서버별 롤링 배포
+      # 1) Vue 서버(사설 8008)에 새 jar 게시 → ASG가 나중에 띄우는 서버가 부팅 때 받아감
+      #    반드시 서버 재시작보다 먼저: 재시작 때 fetch 스크립트가 Vue의 jar와 비교하기 때문.
+      - name: 최신 jar 게시 (Vue 서버 아티팩트)
         if: ${{ env.DO_DEPLOY == 'true' }}
-        env:
-          API_HOSTS: ${{ secrets.API_HOSTS }}
         run: |
           set -euo pipefail
           test -f build/libs/app.jar
-          echo "jar sha256: $(sha256sum build/libs/app.jar | cut -c1-12)"
-          i=0
-          for h in $API_HOSTS; do
-            i=$((i+1))
-            echo "=== api$i ($h) 배포 ==="
-            scp -F "$SSHCFG" build/libs/app.jar api$i:/opt/course-change/app.jar.new
-            ssh -F "$SSHCFG" api$i 'bash -s' <<'REMOTE'
+          (cd build/libs && sha256sum app.jar > app.jar.sha256)
+          echo "jar sha256: $(cut -c1-12 build/libs/app.jar.sha256)"
+          publish='set -euo pipefail
+            d=/var/www/artifacts/course-change
+            if [ ! -d "$d" ]; then echo MISSING; exit 0; fi
+            cd "$d"
+            rm -f app.jar.prev app.jar.sha256.prev
+            [ -f app.jar ] && cp -p app.jar app.jar.prev && cp -p app.jar.sha256 app.jar.sha256.prev
+            mv -f /tmp/cc-app.jar app.jar.tmp && mv -f app.jar.tmp app.jar
+            mv -f /tmp/cc-app.jar.sha256 app.jar.sha256
+            chmod 644 app.jar app.jar.sha256
+            command -v restorecon >/dev/null 2>&1 && restorecon app.jar app.jar.sha256 2>/dev/null || true
+            sha256sum -c app.jar.sha256 >/dev/null && echo PUBLISHED'
+          if [ "$VIA_RUNNER" = true ]; then
+            cp build/libs/app.jar /tmp/cc-app.jar; cp build/libs/app.jar.sha256 /tmp/cc-app.jar.sha256
+            out=$(bash -c "$publish" 2>&1) || true
+          else
+            scp -F "$SSHCFG" build/libs/app.jar bastion:/tmp/cc-app.jar
+            scp -F "$SSHCFG" build/libs/app.jar.sha256 bastion:/tmp/cc-app.jar.sha256
+            out=$(ssh -F "$SSHCFG" bastion 'bash -s' <<<"$publish" 2>&1) || true
+          fi
+          rm -f /tmp/cc-app.jar /tmp/cc-app.jar.sha256 2>/dev/null || true
+          case "$out" in
+            *PUBLISHED*) echo "Vue 아티팩트 게시 완료"; echo "ARTIFACT_PUBLISHED=1" >> "$GITHUB_ENV" ;;
+            *MISSING*)   echo "::warning title=아티팩트 미설정::Vue 서버에 /var/www/artifacts 가 없어 게시를 건너뜁니다. deploy/setup-vue-artifacts.sh 를 한 번 실행하세요."; echo "ARTIFACT_PUBLISHED=0" >> "$GITHUB_ENV" ;;
+            *) echo "::error::Vue 아티팩트 게시 실패: $out"; exit 1 ;;
+          esac
+
+      # 2) 대상 서버 한 대씩: fetch 스크립트 설치 → jar 교체 → 재시작 → 헬스체크
+      #    한 대라도 실패하면 Vue 아티팩트와 이미 바꾼 서버까지 전부 이전 jar로 되돌린다.
+      - name: 서버별 롤링 배포
+        if: ${{ env.DO_DEPLOY == 'true' }}
+        run: |
+          set -euo pipefail
+          read -r -a aliases <<< "$API_ALIASES"
+          read -r -a ips <<< "$TARGET_HOSTS"
+          done_hosts=()
+
+          rollback() {
+            echo "::group::롤백"
+            if [ "${ARTIFACT_PUBLISHED:-0}" = 1 ]; then
+              restore='d=/var/www/artifacts/course-change; cd "$d" || exit 0
+                if [ -f app.jar.prev ]; then mv -f app.jar.prev app.jar; mv -f app.jar.sha256.prev app.jar.sha256; else rm -f app.jar app.jar.sha256; fi; echo restored'
+              if [ "$VIA_RUNNER" = true ]; then bash -c "$restore" || true
+              else ssh -F "$SSHCFG" bastion 'bash -s' <<<"$restore" || true; fi
+              echo "Vue 아티팩트 → 이전 jar"
+            fi
+            for a in "$@"; do
+              ssh -F "$SSHCFG" "$a" 'SUDO=""; [ "$(id -u)" != 0 ] && SUDO="sudo"; cd /opt/course-change && [ -f app.jar.prev ] && $SUDO cp -p app.jar.prev app.jar && $SUDO touch .skip-fetch && $SUDO systemctl restart course-change && echo "rolled back"' || echo "::warning::$a 롤백 실패 - 직접 확인 필요"
+            done
+            echo "::endgroup::"
+          }
+
+          for idx in "${!aliases[@]}"; do
+            a=${aliases[$idx]}; h=${ips[$idx]}
+            echo "=== $a ($h) 배포 ==="
+            scp -F "$SSHCFG" build/libs/app.jar "$a":/opt/course-change/app.jar.new
+            scp -F "$SSHCFG" deploy/fetch-latest-jar.sh "$a":/tmp/fetch-latest-jar.sh
+            scp -F "$SSHCFG" deploy/course-change.service.d/fetch-jar.conf "$a":/tmp/fetch-jar.conf
+            if ssh -F "$SSHCFG" "$a" 'bash -s' <<'REMOTE'
           set -euo pipefail
           SUDO=""; [ "$(id -u)" != 0 ] && SUDO="sudo"
           cd /opt/course-change
+          # 부팅 시 최신 jar 받아오기 (매 배포마다 최신으로 설치 → 이 서버로 이미지를 떠도 포함됨)
+          $SUDO install -m 755 -o root -g root /tmp/fetch-latest-jar.sh /opt/course-change/fetch-latest-jar.sh
+          $SUDO install -d -m 755 /etc/systemd/system/course-change.service.d
+          $SUDO install -m 644 -o root -g root /tmp/fetch-jar.conf /etc/systemd/system/course-change.service.d/fetch-jar.conf
+          rm -f /tmp/fetch-latest-jar.sh /tmp/fetch-jar.conf
+          $SUDO systemctl daemon-reload
           $SUDO chown root:course app.jar.new
           $SUDO chmod 640 app.jar.new
-          had_previous=0
-          if [ -f app.jar ]; then cp -p app.jar app.jar.prev; had_previous=1; fi
-          mv app.jar.new app.jar
-          if $SUDO systemctl restart course-change; then
-            # 최대 90초 동안 헬스체크
-            for n in $(seq 1 45); do
-              if curl -fsS http://localhost:8080/actuator/health >/dev/null 2>&1; then
-                echo "health OK"; exit 0
-              fi
-              sleep 2
-            done
-          fi
-          echo "health FAILED → 이전 jar로 롤백"
-          if [ "$had_previous" -eq 1 ]; then
-            cp -p app.jar.prev app.jar
-            $SUDO systemctl restart course-change
-          fi
-          exit 1
-          REMOTE
+          if [ -f app.jar ]; then $SUDO cp -p app.jar app.jar.prev; fi
+          $SUDO mv app.jar.new app.jar
+          echo "sha256: $(sha256sum app.jar | cut -c1-12)"
+          $SUDO systemctl restart course-change || exit 1
+          # 최대 90초 동안 헬스체크
+          for n in $(seq 1 45); do
+            if curl -fsS http://localhost:8080/actuator/health >/dev/null 2>&1; then
+              echo "health OK ($(sha256sum app.jar | cut -c1-12))"; exit 0
+            fi
+            sleep 2
           done
+          echo "health FAILED"; exit 1
+          REMOTE
+            then
+              done_hosts+=("$a")
+            else
+              echo "::error title=배포 실패::$a ($h) 헬스체크 실패 → 전체 롤백"
+              rollback "${done_hosts[@]}" "$a"
+              exit 1
+            fi
+          done
+          echo "::notice title=배포 완료::${#done_hosts[@]}대 ($TARGET_HOSTS) jar $(cut -c1-12 build/libs/app.jar.sha256)"
 
       # 수동 실행에서 reset_demo를 체크했을 때만. push 자동 배포는 데이터를 건드리지 않는다.
       - name: 시연 DB 초기화 (seed_demo.sql)

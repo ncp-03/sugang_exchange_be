@@ -59,7 +59,7 @@ ssh-keygen -t ed25519 -f api_deploy_key -N "" -C "github-actions-api"
 | `BASTION_SSH_PRIVATE_KEY` | Vue 서버 접속용 개인키 전체 (`-----BEGIN` ~ `END` 포함) |
 | `API_SSH_PRIVATE_KEY` | API 서버 접속용 개인키 전체 (`-----BEGIN` ~ `END` 포함) |
 | `BASTION_HOST` | Vue 서버 공인 IP (`211.233.199.89`) |
-| `API_HOSTS` | 두 API 서버 사설 IP를 공백으로 구분 (`10.0.5.6 10.0.5.7`) |
+| `API_HOSTS` | 고정 API 서버 사설 IP를 공백으로 구분 (`10.0.5.6 10.0.5.7`). 배포 순서 우선순위 + Target Group 조회 실패 시 대체 목록 |
 | `SSH_USER` | 세 서버에서 접속을 확인한 `root` |
 
 위 5개 비밀값은 `ncp-03/sugang_exchange_be` 저장소에 등록했습니다. 현재 기본 브랜치는 `main`입니다 (10/29 `wip/day22`에서 이름 변경). `.github/workflows/deploy.yml`의 수동 실행 `deploy=false`에서 Vue 경유 두 API SSH 접속을 확인했습니다. `main`의 CI 성공 뒤에는 두 API 서버에 순차 자동 배포됩니다. 수동 실행은 Actions → Deploy → Run workflow에서 `deploy=true`를 선택하면 배포하고, 기본값 `false`에서는 SSH만 점검합니다.
@@ -73,6 +73,39 @@ Vue 서버에 GitHub Actions 러너를 설치하면 배포에 인바운드 SSH�
 - 부하테스트 중에 꼭 배포해야 하면: Actions → Deploy → Run workflow에서 `allow_loadtest_db` 체크.
 - 시연 데이터 초기화: Actions → Deploy → Run workflow에서 `reset_demo` 체크 (`deploy`를 끄면 초기화만 한다). API 01에서 `tools/db/seed_demo.sql`을 `course_change`에만 실행한다. push 자동 배포는 데이터를 건드리지 않는다.
 - 오토스케일링 서버 이미지도 `DB_URL`이 `course_change`인 상태에서 만들어야 한다.
+
+## 5-1. 오토스케일링 대응 배포 (10/29 추가)
+ASG가 띄운 서버가 옛 이미지의 jar로 LB에 붙어서 1/3 확률로 404가 났던 문제를 막는다. 두 가지로 해결한다.
+
+```
+배포 시:  Actions ─┬─ NCP API getTargetList → Target Group의 서버 전부(01, 02, ASG…)에 한 대씩 배포
+                   └─ Vue 서버 /var/www/artifacts/course-change/app.jar(+sha256)에 최신 jar 게시
+부팅 시:  ASG 새 서버 ─ course-change 시작 직전(ExecStartPre) ─▶ Vue:8008에서 해시 비교 → 다르면 받아서 교체
+```
+
+### 한 번만 하는 설정
+1. **NCP API 키** (조회 전용 서브 계정 권장: Sub Account → Load Balancer 조회 권한만)
+   - 백엔드 레포 Secrets: `NCP_ACCESS_KEY`, `NCP_SECRET_KEY`
+   - 백엔드 레포 **Variables**: `NCP_TARGET_GROUP_NO` = API Target Group 번호(숫자, 콘솔 Target Group 상세에 있음)
+   - 없으면 예전처럼 `API_HOSTS`에만 배포하고 경고만 남긴다.
+2. **Vue 서버 아티팩트 포트** (root, 러너를 설치했다면 그 뒤에 실행 → 폴더 소유자가 `gha`가 됨)
+   ```bash
+   ssh ncp-vue 'bash -s' < deploy/setup-vue-artifacts.sh
+   ```
+3. **ACG**
+   - Vue 서버 인바운드: TCP **8008** ← `10.0.5.0/24`(API 서브넷)만
+   - API 서버(ASG 포함) 아웃바운드: TCP 8008 → `10.0.1.8` (아웃바운드 전체 허용이면 그대로)
+4. 위를 마친 뒤 **배포 1회** (Actions → Deploy → `deploy` 체크). 모든 API 서버에 fetch 스크립트와 systemd 드롭인
+   (`/etc/systemd/system/course-change.service.d/fetch-jar.conf`)이 설치된다.
+5. **ASG 이미지를 한 번만 다시 만든다** (4번 이후의 API 02 기준). 이후로는 이미지가 낡아도 부팅 때 최신 jar를 받으므로 다시 만들 필요 없다.
+
+### 동작 규칙
+- 배포 순서는 `API_HOSTS`에 있는 서버 먼저(api1 = course-api-01, 만료 스케줄러 ON, 시드 초기화 실행), 나머지는 IP 순.
+- DB 확인(시연 DB `course_change`)도 Target Group 서버 **전부**에 한다. 부하테스트로 DB를 바꿀 땐 ASG 서버도 같이 바꾸고 되돌릴 것.
+- 한 대라도 헬스체크에 실패하면 Vue 아티팩트와 이미 바꾼 서버까지 전부 이전 jar로 되돌린다(롤백 재시작 때는 `.skip-fetch`로 다시 받지 않음).
+- fetch 스크립트는 Vue에 못 붙거나 해시가 안 맞으면 **기존 jar로 그냥 시작**한다(서비스 시작을 막지 않음). 로그: `journalctl -u course-change | grep fetch-latest-jar`
+- 만료 스케줄러(`APP_MATCHING_EXPIRE_SCHEDULER`)는 course-api-01만 `true`. ASG 이미지는 API 02(false) 기준으로 만든다.
+- 배포 도중 ASG가 서버를 줄이면 그 서버 SSH가 실패해 배포가 롤백된다 → 다시 실행.
 
 ## 6. 문제 확인
 - `bastion ok`가 안 찍힘 → Vue 서버 22번 ACG 또는 키 불일치
