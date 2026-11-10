@@ -9,7 +9,69 @@
 | 인증 | 학번 + 비밀번호 로그인 → HMAC 서명 토큰 (Bearer) |
 | API 문서 | springdoc Swagger UI |
 | 테스트 | JUnit 5 + Testcontainers(실제 MySQL 컨테이너) |
-| CI | GitHub Actions (테스트 + jar 실행 스모크 테스트) |
+| CI | GitHub Actions (테스트 + jar 실행 스모크 테스트 + 시연 시나리오 리허설) |
+| 배포 | NCP: LB → API 서버 오토스케일링 그룹 → Cloud DB for MySQL, main 푸시 시 롤링 배포 |
+
+> 네이버클라우드 아카데미 **클라우드 Literacy 과정 3조** 프로젝트입니다 (고명주·한승석·강민규·김세현, 발표 2026-10-30).
+> 과정이 끝나 NCP 실습 계정이 정리되어 서버는 현재 내려가 있습니다. 아래 수치와 구성은 발표자료와 GitHub Actions 실행 기록 기준입니다.
+
+## 결과 요약
+
+### 1. 동시 매칭 정합성 — 락 없음 vs 비관적 락
+
+같은 강의 자리를 노리는 매칭 요청이 동시에 들어오면, 락이 없을 때 한 사람의 수강 내역이 두 매칭 세션에 동시에 묶였습니다.
+운영체제의 교착 상태 조건 중 **순환 대기**를 없애기 위해, 두 요청 행과 두 좌석 행을 **항상 ID 오름차순으로** `SELECT ... FOR UPDATE` 잠금하도록 했습니다
+([`MatchingService.java`](src/main/java/com/ncp03/coursechange/exchange/MatchingService.java)의 `PESSIMISTIC` 분기).
+락 전략은 `APP_MATCHING_LOCK_MODE` 설정값으로 분리해 같은 jar로 두 방식을 비교했습니다.
+
+| 조건 | 값 |
+|---|---|
+| 시나리오 | k6 `lt07` (동시 쓰기), [`scripts/k6/scenarios.js`](scripts/k6/scenarios.js) |
+| 동시 사용자 | 20 VU, 매칭 요청 20건 |
+| 대상 | NCP 로드밸런서 → API 서버 2대 (Vue 서버에서 k6 실행) |
+| DB | 운영과 분리한 `course_change_loadtest`, 가상 학생 10,000명 적재 |
+| 통제 | 동일 시나리오·동일 VU·동일 jar·동일 DB 백업에서 `APP_MATCHING_LOCK_MODE`만 바꿈, 모드별 1회 측정 |
+
+| 지표 | 락 없음 (`NONE`) | 비관적 락 (`PESSIMISTIC`) |
+|---|---|---|
+| 매칭 요청 결과 (20건) | 성공 3 / 실패(500) 17 | **성공 20 / 실패 0** |
+| 한 요청이 여러 세션에 묶임 | 2건 | **0건** |
+| PENDING 세션 수 | 3개 (같은 두 사람이 3번 묶임) | 1개 |
+| p95 응답시간 | 599 ms | 1,503 ms (**약 2.5배**) |
+| 처리량 | 39.6 req/s | 22.0 req/s |
+
+응답은 약 2.5배 느려졌지만, 중복 매칭은 결과 자체가 틀리는 오류라서 정합성을 택했습니다. 기본값은 `PESSIMISTIC`이고 `NONE`은 비교 실험용입니다.
+
+### 2. 조회 폭증
+
+| 항목 | 결과 |
+|---|---|
+| 시나리오 | k6 `read_spike`, 조회 사용자를 최대 32 VU까지 단계적으로 증가 |
+| 부하 구간 | 약 6분 10초 |
+| HTTP 요청 | 10,029건 (초당 평균 27.06건) |
+| 오류 | 0건 (실패율 0.00%) |
+| 응답시간 평균 / p95 | 19.72 ms / 28.11 ms |
+| 기능 검사 | 12,343건 모두 통과 |
+
+> **측정 주체**: 부하테스트 시나리오 작성과 실행·결과 분석은 한승석(메인)·강민규(서브)가 했습니다. 락 전략 분리(`APP_MATCHING_LOCK_MODE`)와 ID 오름차순 잠금 등 매칭·동시성 코드는 고명주가 맡았습니다.
+
+### 3. 배포 — SSH 22번 인바운드 없이 배포 (셀프호스티드 러너)
+
+처음에는 GitHub 호스팅 러너가 밖에서 Vue 서버로 SSH 접속해 배포했고, 러너 IP가 매번 바뀌어 ACG에 22번을 전체 공개로 열어 둬야 했습니다.
+Vue 서버 안에 GitHub Actions **셀프호스티드 러너**를 설치해, 러너가 GitHub로 **나가는 443 연결**로 작업을 받아 오고 사설망으로 API 서버에 배포하도록 바꿨습니다. 그래서 들어오는 22번이 필요 없어졌습니다.
+
+```
+[전환 전]  GitHub 러너 ──SSH 22(인바운드, 전체 공개)──▶ Vue 서버 ──SSH──▶ API 서버
+[전환 후]  GitHub ◀──HTTPS 443(아웃바운드)── 러너(Vue 서버 안) ──SSH(사설망)──▶ API 서버
+```
+
+- 전환 방식: 저장소 변수 `DEPLOY_VIA_RUNNER=true`일 때만 러너 사용, 지우면 기존 방식으로 복귀 ([`deploy.yml`](.github/workflows/deploy.yml), 설치 방법 [`deploy/runner/README.md`](deploy/runner/README.md))
+- 실행 기록: **2026-10-30 12:49 (KST)** 배포부터 러너 `course-vue-01-be`(머신 `course-vue-01`)에서 실행, 이후 Deploy 9회 연속 성공. 로그에 `배포 경로: 셀프호스티드 러너(Vue 서버) → API 사설 IP`가 남아 있습니다 (Actions → Deploy, 발췌: [`docs/deploy-runner-log.md`](docs/deploy-runner-log.md)).
+- jar 빌드는 계속 GitHub 호스팅 러너에서 하고, 배포 단계만 셀프호스티드 러너가 맡습니다.
+
+아래 그림은 **전환 전(10/29)** 구성입니다. ACG 칸의 `SSH 22 공개`가 전환 후 필요 없어진 부분입니다.
+
+![NCP 배포 아키텍처 (10/29, 전환 전)](docs/images/ncp-architecture-1029.png)
 
 ## 실행 방법
 
@@ -70,8 +132,8 @@ java -jar app.jar --app.matching.lock-mode=PESSIMISTIC
 
 ## 문서
 - [API 목록](docs/api.md): 엔드포인트 표, 에러 코드, 응답 필드
-- [ERD](docs/erd.png) (원본 [erd.mmd](docs/erd.mmd)): 테이블 11개 관계도
-- [부하테스트 안내](loadtest/실행_안내.md): 락 없음/있음 비교 실행 방법
+- [부하테스트 시나리오](scripts/k6/README.md): k6 프로필별 실행 방법, 검증 SQL은 [`tools/db/verify_loadtest.sql`](tools/db/verify_loadtest.sql)
+- [배포 안내](deploy/README.md), [셀프호스티드 러너](deploy/runner/README.md)
 - 스키마 원본: `src/main/resources/db/migration/V1__init_schema.sql`
 
 ## API 요약
@@ -130,7 +192,9 @@ src/main/java/com/ncp03/coursechange/
 ├─ wishlist/    찜 API
 └─ exchange/    교환 요청, 매칭, 패널티, 우선순위, 만료 스케줄러
 src/main/resources/db/migration/   Flyway 스키마·샘플 데이터
-loadtest/                          k6 시나리오, 초기화·검증 SQL
+scripts/k6/                        k6 부하테스트 시나리오
+tools/db/                          시연·부하테스트용 데이터, 검증 SQL
+deploy/                            NCP 배포 스크립트, 셀프호스티드 러너 안내
 ```
 
 DB를 바꿀 때는 이미 적용된 `V1`~`V4` 파일을 고치지 말고 `V4__설명.sql`처럼 새 파일을 추가합니다. (적용된 파일을 수정하면 Flyway 체크섬 오류가 납니다.)
